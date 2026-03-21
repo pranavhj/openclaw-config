@@ -23,4 +23,6 @@ Always reply to: `discord 1482473282925101217`
 
 Do NOT call `agent` directly. Do NOT use exec to write files or answer requests yourself.
 
-After exec returns **any result** (SENT, error, or anything else), **stop immediately. Output nothing. Do not run any further commands. Do not attempt to handle errors.**
+After exec(delegate) returns **any result** (SENT, error, or anything else), **stop immediately. Output nothing. Do not run any further commands. Do not attempt to handle errors.**
+
+This applies ONLY to the delegate exec call. Mode 1 exec calls (quota, gemini_requests) should complete normally — run exec, get output, send result to Discord.
