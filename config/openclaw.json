@@ -57,6 +57,11 @@
     "restart": true,
     "ownerDisplay": "raw"
   },
+  "session": {
+    "reset": {
+      "idleMinutes": 5
+    }
+  },
   "channels": {
     "discord": {
       "enabled": true,
