@@ -18,3 +18,5 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-010](issues/OC-010-gemini-channel-misidentification.md) | bug | fixed | Gemini routed Discord message to WhatsApp (BOOT.md out of date, ambiguous channel rules) | `fix(OC-010)` |
 | [OC-011](issues/OC-011-gemini-second-turn-after-delegate.md) | bug | fixed | Gemini did second model turn after delegate (quota footer) — caused gateway error on Discord | `fix(OC-011)` |
 | [OC-012](issues/OC-012-gemini-second-turn-after-exec-error.md) | bug | fixed | Gemini did second model turn after exec(delegate) returned error — typing indicator after rate limit error | `fix(OC-012)` |
+| [OC-013](issues/OC-013-quota-footer-typing-after-response.md) | bug | fixed | Quota footer exec kept typing indicator alive 5–10s after Claude already responded | — |
+| [OC-014](issues/OC-014-gemini-delegates-own-text-not-user-message.md) | bug | fixed | Gemini composed its own text and delegated that instead of the original user message verbatim | — |
