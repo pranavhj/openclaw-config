@@ -67,14 +67,7 @@
   },
   "channels": {
     "whatsapp": {
-      "enabled": true,
-      "dmPolicy": "disabled",
-      "allowFrom": [
-        "${WHATSAPP_ALLOWED_NUMBER}"
-      ],
-      "groupPolicy": "allowlist",
-      "debounceMs": 0,
-      "mediaMaxMb": 50
+      "enabled": false
     },
     "discord": {
       "enabled": true,
