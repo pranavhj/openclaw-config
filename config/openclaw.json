@@ -10,11 +10,10 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "groq/llama-3.3-70b-versatile",
+        "primary": "google/gemini-2.5-flash",
         "fallbacks": [
-          "ollama/qwen2.5-coder:1.5b",
-          "google/gemini-2.5-flash",
-          "google/gemini-2.0-flash-lite"
+          "google/gemini-2.0-flash-lite",
+          "groq/llama-3.3-70b-versatile"
         ]
       },
       "models": {
