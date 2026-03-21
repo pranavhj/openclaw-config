@@ -1,0 +1,149 @@
+#!/bin/bash
+# Daily routing audit — runs via systemd timer, bypasses Gemini entirely
+# Gathers logs from yesterday (or today if run mid-day), passes to Claude for analysis
+
+DATE="${1:-$(date -d yesterday +%Y-%m-%d)}"
+LOGDIR="/tmp/openclaw"
+SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
+DISCORD_TARGET="1482473282925101217"
+PROMPT_FILE=$(mktemp /tmp/route-audit-XXXXXX.txt)
+
+# Gather delegate log
+DELEGATE_LOG=""
+if [ -f "$LOGDIR/delegate-$DATE.log" ]; then
+    DELEGATE_LOG=$(cat "$LOGDIR/delegate-$DATE.log")
+else
+    DELEGATE_LOG="(no delegate log for $DATE)"
+fi
+
+# Gather openclaw gateway log — only exec and Discord send lines
+GATEWAY_LOG=""
+if [ -f "$LOGDIR/openclaw-$DATE.log" ]; then
+    GATEWAY_LOG=$(grep -E '"subsystem":"exec"|Sent via Discord|"subsystem":"tools"' "$LOGDIR/openclaw-$DATE.log" | tail -50)
+else
+    GATEWAY_LOG="(no gateway log for $DATE)"
+fi
+
+# Parse all sessions from that date into a summary
+SESSION_SUMMARY=$(python3 -c "
+import json, os, glob
+
+sessions_dir = '$SESSIONS_DIR'
+target_date = '$DATE'
+results = []
+
+for f in sorted(glob.glob(os.path.join(sessions_dir, '*.jsonl'))):
+    try:
+        with open(f) as fh:
+            first_line = fh.readline()
+            meta = json.loads(first_line)
+            ts = meta.get('timestamp', '')
+            if not ts.startswith(target_date):
+                continue
+            fh.seek(0)
+            lines = fh.readlines()
+    except:
+        continue
+
+    session_id = os.path.basename(f)
+    events = []
+    for line in lines:
+        msg = json.loads(line)
+        t = msg.get('type')
+        if t != 'message':
+            continue
+        m = msg.get('message', {})
+        role = m.get('role', '')
+        content = m.get('content', [])
+        model = m.get('model', '')
+        err = m.get('errorMessage', '')
+        stop = m.get('stopReason', '')
+        ts = msg.get('timestamp', '')
+
+        if err:
+            # Parse nested error JSON
+            try:
+                parsed = json.loads(err)
+                inner = parsed.get('error', {}).get('message', '')
+                if isinstance(inner, str) and inner.startswith('{'):
+                    inner_parsed = json.loads(inner)
+                    err_short = f\"{inner_parsed.get('error',{}).get('code','')} {inner_parsed.get('error',{}).get('message','')[:80]}\"
+                else:
+                    err_short = inner[:100]
+            except:
+                err_short = err[:100]
+            events.append(f'  [{ts}] {role} ERROR ({model}): {err_short}')
+        elif not content:
+            events.append(f'  [{ts}] {role}: (empty) stop={stop}')
+        elif isinstance(content, list):
+            for c in content:
+                if isinstance(c, dict):
+                    ct = c.get('type','')
+                    if ct == 'text':
+                        text = c.get('text','').replace(chr(10),' ')[:120]
+                        events.append(f'  [{ts}] {role}: {text}')
+                    elif ct == 'tool_use':
+                        name = c.get('name','')
+                        inp = str(c.get('input',''))[:150]
+                        events.append(f'  [{ts}] TOOL {name}: {inp}')
+
+    if events:
+        results.append(f'Session: {session_id}')
+        results.extend(events[:30])
+        results.append('')
+
+print(chr(10).join(results) if results else '(no sessions for this date)')
+" 2>/dev/null)
+
+# Current state of routing files
+SKILL_CONTENT=$(cat "$HOME/.openclaw/workspace/skills/delegate/SKILL.md" 2>/dev/null || echo "(missing)")
+
+# Build prompt file
+cat > "$PROMPT_FILE" << 'PROMPT_HEADER'
+## Task: Daily Routing Audit
+
+You are auditing the openclaw routing system. Analyze the logs below and:
+
+1. For each user request, determine: was it delegated to Claude (correct) or answered by Gemini directly (incorrect)?
+2. Flag any errors — rate limits, empty responses, background exec (should be foreground), missing skill loads
+3. If you find a simple fix (editing AGENTS.md, skill files, or other .md config files), make the fix directly
+4. Send a concise summary to Discord with findings using: openclaw message send --channel discord --target 1482473282925101217 --message "<summary>"
+
+**Expected flow for each user message:**
+- Gemini loads delegate skill (tool read of SKILL.md)
+- Gemini runs: delegate <channel> <target> <message> (one exec call, foreground)
+- delegate script runs agent, agent sends response to Discord, returns SENT
+- Gemini appends quota footer
+
+**Red flags:**
+- Gemini answering directly (text response without exec)
+- Background exec (should be foreground)
+- Multiple exec/tool calls for one request (should be one)
+- Rate limit errors (429)
+- Empty responses
+- Gemini polling/retrying after exec
+
+PROMPT_HEADER
+
+cat >> "$PROMPT_FILE" << PROMPT_DATA
+## Date: $DATE
+
+## Delegate Log
+$DELEGATE_LOG
+
+## Gateway Log (exec and send events only)
+$GATEWAY_LOG
+
+## Session Summaries
+$SESSION_SUMMARY
+
+## Current Skill File
+$SKILL_CONTENT
+PROMPT_DATA
+
+# Run Claude with prompt from file
+cd /home/pranav/projects/openclaw && agent --continue --permission-mode bypassPermissions --model claude-opus-4-6 --print "$(cat "$PROMPT_FILE")"
+EXIT=$?
+
+rm -f "$PROMPT_FILE"
+exit $EXIT

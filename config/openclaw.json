@@ -1,0 +1,97 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.3.13"
+  },
+  "env": {
+    "OLLAMA_API_KEY": "ollama-local",
+    "GEMINI_API_KEY": "${GEMINI_API_KEY}",
+    "GROQ_API_KEY": "${GROQ_API_KEY}"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "google/gemini-2.5-flash",
+        "fallbacks": ["google/gemini-2.0-flash-lite", "groq/llama-3.3-70b-versatile"]
+      },
+      "models": {
+        "ollama/qwen2.5-coder:7b": {},
+        "ollama/qwen2.5-coder:3b": {},
+        "google/gemini-2.0-flash": {},
+        "groq/llama-3.3-70b-versatile": {},
+        "groq/llama-3.1-8b-instant": {},
+        "groq/qwen/qwen3-32b": {},
+        "groq/moonshotai/kimi-k2-instruct": {},
+        "groq/llama3-70b-8192": {},
+        "groq/mistral-saba-24b": {},
+        "groq/meta-llama/llama-4-scout-17b-16e-instruct": {},
+        "google/gemini-2.0-flash-lite": {},
+        "google/gemini-2.5-flash": { "alias": "gemini_requests" }
+      },
+      "workspace": "/home/pranav/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      }
+    }
+  },
+  "tools": {
+    "profile": "coding",
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "gemini",
+        "gemini": {
+          "apiKey": "${GEMINI_SEARCH_API_KEY}"
+        }
+      }
+    },
+    "exec": {
+      "security": "full",
+      "ask": "off"
+    }
+  },
+  "skills": {
+    "allowBundled": ["__none__"]
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "channels": {
+    "whatsapp": {
+      "enabled": true,
+      "dmPolicy": "disabled",
+      "allowFrom": [
+        "${WHATSAPP_ALLOWED_NUMBER}"
+      ],
+      "groupPolicy": "allowlist",
+      "debounceMs": 0,
+      "mediaMaxMb": 50
+    },
+    "discord": {
+      "enabled": true,
+      "token": "${DISCORD_BOT_TOKEN}",
+      "groupPolicy": "allowlist",
+      "streaming": "off",
+      "dmPolicy": "pairing",
+      "allowFrom": [
+        "${DISCORD_ALLOWED_USER_ID}"
+      ],
+      "retry": {
+        "attempts": 1
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "controlUi": {
+      "enabled": false
+    },
+    "auth": {
+      "mode": "token",
+      "token": "${GATEWAY_AUTH_TOKEN}"
+    }
+  }
+}

@@ -1,0 +1,61 @@
+#!/bin/bash
+# Run all openclaw test suites and send a summary to Discord.
+# Safe to call from inside the gateway (exec tool) — skips gateway restart.
+
+DISCORD_TARGET="1482473282925101217"
+SKIP_GATEWAY_RESTART=1
+export SKIP_GATEWAY_RESTART
+
+U=0; I=0; B=0; UF=0; IF=0; BF=0
+
+echo "=== Unit tests ==="
+UNIT_OUT=$(bash /home/pranav/test_delegate.sh 2>&1)
+echo "$UNIT_OUT"
+U=$(echo "$UNIT_OUT" | grep -c '  PASS:')
+UF=$(echo "$UNIT_OUT" | grep -c '  FAIL:')
+
+echo ""
+echo "=== Integration tests ==="
+INT_OUT=$(bash /home/pranav/test_integration.sh 2>&1)
+echo "$INT_OUT"
+I=$(echo "$INT_OUT" | grep -c '  PASS:')
+IF=$(echo "$INT_OUT" | grep -c '  FAIL:')
+
+echo ""
+echo "=== Behavior tests ==="
+BEH_OUT=$(bash /home/pranav/test_claude_behavior.sh 2>&1)
+echo "$BEH_OUT"
+B=$(echo "$BEH_OUT" | grep -c '  PASS:')
+BF=$(echo "$BEH_OUT" | grep -c '  FAIL:')
+
+TOTAL_PASS=$((U + I + B))
+TOTAL_FAIL=$((UF + IF + BF))
+
+if [[ $TOTAL_FAIL -eq 0 ]]; then
+  VERDICT="✅ ALL GREEN"
+elif [[ $TOTAL_FAIL -le 3 ]]; then
+  VERDICT="🟡 DEGRADED"
+else
+  VERDICT="🔴 BROKEN"
+fi
+
+# Send summary to Discord
+MSG="**Test results — $(date '+%Y-%m-%d %H:%M %Z')**
+$VERDICT — $TOTAL_PASS passed, $TOTAL_FAIL failed
+
+Unit (delegate): ${U}p/${UF}f
+Integration: ${I}p/${IF}f
+Behavior (CLAUDE.md): ${B}p/${BF}f"
+
+# Append any failures
+FAILS=$(echo "$UNIT_OUT
+$INT_OUT
+$BEH_OUT" | grep '  FAIL:' | sed 's/  FAIL: /• /' | head -10)
+if [[ -n "$FAILS" ]]; then
+  MSG="$MSG
+
+Failures:
+$FAILS"
+fi
+
+openclaw message send --channel discord --target "$DISCORD_TARGET" --message "$MSG"

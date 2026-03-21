@@ -1,0 +1,74 @@
+#!/bin/bash
+# Single delegation command — Gemini calls this, script handles the rest
+CHANNEL="$1"
+TARGET="$2"
+shift 2
+MESSAGE="$*"
+
+LOGDIR="/tmp/openclaw"
+LOGFILE="$LOGDIR/delegate-$(date +%Y-%m-%d).log"
+LOCKFILE="$LOGDIR/delegate.lock"
+mkdir -p "$LOGDIR"
+
+# Prevent duplicate concurrent runs (Gemini sometimes fires twice in background mode)
+if ! mkdir "$LOCKFILE" 2>/dev/null; then
+  echo "SENT" # pretend success so Gemini stops retrying
+  exit 0
+fi
+trap "rmdir '$LOCKFILE' 2>/dev/null" EXIT
+
+PROJECTS=$(ls /home/pranav/projects/ 2>/dev/null | tr '\n' ', ')
+CONVLOG=$(tail -30 /tmp/openclaw/openclaw-$(date +%Y-%m-%d).log 2>/dev/null || echo '(no log today)')
+
+# Clear Gemini session history — router needs no cross-turn context, keeps tokens minimal
+SESSIONS_DIR="/home/pranav/.openclaw/agents/main/sessions"
+SESSION_KEY=$([ "$CHANNEL" = "discord" ] && echo "agent:main:main" || python3 -c "
+import json
+with open('$SESSIONS_DIR/sessions.json') as f:
+    s = json.load(f)
+[print(k) for k in s if '$TARGET' in k and 'cron' not in k]
+" 2>/dev/null | head -1)
+if [[ -n "$SESSION_KEY" ]]; then
+  SESSION_ID=$(python3 -c "import json
+with open('$SESSIONS_DIR/sessions.json') as f: s=json.load(f)
+print(s.get('$SESSION_KEY',{}).get('sessionId',''))" 2>/dev/null)
+  [[ -n "$SESSION_ID" && -f "$SESSIONS_DIR/${SESSION_ID}.jsonl" ]] && \
+    > "$SESSIONS_DIR/${SESSION_ID}.jsonl"
+fi
+
+# Log the delegation
+{
+  echo "=== $(date '+%Y-%m-%d %H:%M:%S %Z') ==="
+  echo "channel: $CHANNEL"
+  echo "target: $TARGET"
+  echo "message: $MESSAGE"
+  echo "projects: ${PROJECTS:-none}"
+  echo "status: starting"
+} >> "$LOGFILE"
+
+# Build prompt in a temp file to safely handle special chars in $MESSAGE / $CONVLOG
+PROMPT_FILE=$(mktemp /tmp/delegate-prompt-XXXXXX.txt)
+cat > "$PROMPT_FILE" << 'HEADER'
+## Reply
+HEADER
+printf 'Channel: %s\nTarget: %s\n\n' "$CHANNEL" "$TARGET" >> "$PROMPT_FILE"
+printf '## Known projects in /home/pranav/projects/\n%s\n\n' "${PROJECTS:-none}" >> "$PROMPT_FILE"
+printf '## Recent conversation (last 30 lines)\n%s\n\n' "$CONVLOG" >> "$PROMPT_FILE"
+printf '## Request\n%s\n' "$MESSAGE" >> "$PROMPT_FILE"
+
+# Run agent
+OUTPUT=$(cd /home/pranav/projects/openclaw && agent --continue --permission-mode bypassPermissions --print "$(cat "$PROMPT_FILE")" 2>&1)
+rm -f "$PROMPT_FILE"
+
+EXIT_CODE=$?
+
+# Log the result
+{
+  echo "exit_code: $EXIT_CODE"
+  echo "output: $OUTPUT"
+  echo "status: done"
+  echo ""
+} >> "$LOGFILE"
+
+# Pass through output so openclaw sees SENT
+echo "$OUTPUT"
