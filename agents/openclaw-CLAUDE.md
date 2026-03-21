@@ -92,6 +92,19 @@ You are the expert on the openclaw system. When diagnosing issues, read the live
 | Session logs | `/tmp/openclaw/openclaw-YYYY-MM-DD.log` |
 | Delegate logs | `/tmp/openclaw/delegate-YYYY-MM-DD.log` |
 | Gemini sessions (JSONL) | `/home/pranav/.openclaw/agents/main/sessions/` |
+| Issue tracker + source control | `/home/pranav/openclaw-config/` → github.com/pranavhj/openclaw-config |
+
+## Source control workflow
+
+After editing any config file, sync and commit:
+```bash
+cd /home/pranav/openclaw-config
+bash scripts/sync-from-live.sh
+git add -A && git commit -m "fix(OC-NNN): description"
+git push
+```
+
+Check open issues before diagnosing: `cat /home/pranav/openclaw-config/ISSUES.md`
 
 Test scripts:
 - `bash /home/pranav/test_delegate.sh` — unit tests
