@@ -12,6 +12,7 @@
       "model": {
         "primary": "groq/llama-3.3-70b-versatile",
         "fallbacks": [
+          "ollama/qwen2.5-coder:7b",
           "google/gemini-2.5-flash",
           "google/gemini-2.0-flash-lite"
         ]
