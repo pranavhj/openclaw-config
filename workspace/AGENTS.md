@@ -14,9 +14,7 @@ NOT Mode 1: any question (even simple ones), anything with a "?", "hi + question
 Load the **delegate** skill and follow its instructions exactly. Do NOT call `agent` directly.
 
 Channel/target to pass to delegate:
-- Discord DM from pranav → `discord 1482473282925101217`
-- WhatsApp from pranav → `whatsapp +12403967835`
-- If unclear → default to `discord 1482473282925101217`
+- Always use: `discord 1482473282925101217`
 
 After exec returns SENT, append the quota footer and stop.
 
