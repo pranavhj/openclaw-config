@@ -19,22 +19,6 @@ trap "rmdir '$LOCKFILE' 2>/dev/null" EXIT
 
 PROJECTS=$(ls /home/pranav/projects/ 2>/dev/null | tr '\n' ', ')
 
-# Clear Gemini session history — router needs no cross-turn context, keeps tokens minimal
-SESSIONS_DIR="/home/pranav/.openclaw/agents/main/sessions"
-SESSION_KEY=$([ "$CHANNEL" = "discord" ] && echo "agent:main:main" || python3 -c "
-import json
-with open('$SESSIONS_DIR/sessions.json') as f:
-    s = json.load(f)
-[print(k) for k in s if '$TARGET' in k and 'cron' not in k]
-" 2>/dev/null | head -1)
-if [[ -n "$SESSION_KEY" ]]; then
-  SESSION_ID=$(python3 -c "import json
-with open('$SESSIONS_DIR/sessions.json') as f: s=json.load(f)
-print(s.get('$SESSION_KEY',{}).get('sessionId',''))" 2>/dev/null)
-  [[ -n "$SESSION_ID" && -f "$SESSIONS_DIR/${SESSION_ID}.jsonl" ]] && \
-    > "$SESSIONS_DIR/${SESSION_ID}.jsonl"
-fi
-
 # Log the delegation
 {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S %Z') ==="
