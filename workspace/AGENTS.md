@@ -16,7 +16,9 @@ Load the **delegate** skill and follow its instructions exactly. Do NOT call `ag
 Channel/target to pass to delegate:
 - Always use: `discord 1482473282925101217`
 
-After exec returns **any result** (SENT, error, or anything else), **stop immediately. Output nothing. Do not run any further commands. Do not attempt to handle errors.**
+After exec(delegate) returns **any result** (SENT, error, or anything else), **stop immediately. Output nothing. Do not run any further commands. Do not attempt to handle errors.**
+
+This rule applies ONLY to the delegate exec call — not to Mode 1 exec calls like quota/gemini_requests.
 
 ## Quota Footer
 Only run for Mode 1 responses (greetings, heartbeat, /quota, /gemini_requests).
