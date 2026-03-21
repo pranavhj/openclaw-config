@@ -96,13 +96,19 @@ You are the expert on the openclaw system. When diagnosing issues, read the live
 
 ## Source control workflow
 
-After editing any config file, sync and commit:
+**After editing any config file, you MUST sync and commit:**
 ```bash
 cd /home/pranav/openclaw-config
-bash scripts/sync-from-live.sh
+bash scripts/sync-from-live.sh      # pulls live → repo, auto-redacts secrets
 git add -A && git commit -m "fix(OC-NNN): description"
 git push
 ```
+
+Commit format: `<type>(<scope>): <description>`
+- type: `fix` | `feat` | `config` | `sync` | `docs` | `misc`
+- scope: `OC-NNN` (issue ID) or `sync` | `misc` | `docs`
+
+The path watcher auto-commits simple drift, but your intentional changes need a proper commit.
 
 Check open issues before diagnosing: `cat /home/pranav/openclaw-config/ISSUES.md`
 

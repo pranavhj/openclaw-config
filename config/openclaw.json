@@ -11,7 +11,10 @@
     "defaults": {
       "model": {
         "primary": "google/gemini-2.5-flash",
-        "fallbacks": ["google/gemini-2.0-flash-lite", "groq/llama-3.3-70b-versatile"]
+        "fallbacks": [
+          "google/gemini-2.0-flash-lite",
+          "groq/llama-3.3-70b-versatile"
+        ]
       },
       "models": {
         "ollama/qwen2.5-coder:7b": {},
@@ -25,7 +28,9 @@
         "groq/mistral-saba-24b": {},
         "groq/meta-llama/llama-4-scout-17b-16e-instruct": {},
         "google/gemini-2.0-flash-lite": {},
-        "google/gemini-2.5-flash": { "alias": "gemini_requests" }
+        "google/gemini-2.5-flash": {
+          "alias": "gemini_requests"
+        }
       },
       "workspace": "/home/pranav/.openclaw/workspace",
       "compaction": {
@@ -50,7 +55,9 @@
     }
   },
   "skills": {
-    "allowBundled": ["__none__"]
+    "allowBundled": [
+      "__none__"
+    ]
   },
   "commands": {
     "native": "auto",
