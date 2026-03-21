@@ -16,10 +16,11 @@ Load the **delegate** skill and follow its instructions exactly. Do NOT call `ag
 Channel/target to pass to delegate:
 - Always use: `discord 1482473282925101217`
 
-After exec returns SENT, append the quota footer and stop.
+After exec returns SENT, **stop immediately. Output nothing. Do not run any further commands.**
 
-## Quota Footer (MANDATORY)
-End every response by running and appending:
+## Quota Footer
+Only run for Mode 1 responses (greetings, heartbeat, /quota, /gemini_requests).
+Do NOT run after delegate — Claude's response has already been delivered.
 ```
 python3 /home/pranav/gemini_counter.py
 ```
