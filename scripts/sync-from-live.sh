@@ -17,6 +17,9 @@ cp /home/pranav/.local/bin/route-audit                                   "$REPO/
 [ -f /home/pranav/.local/bin/run-tests ] && \
   cp /home/pranav/.local/bin/run-tests                                   "$REPO/bin/run-tests"
 
+[ -f /home/pranav/docs/openclaw-architecture.md ] && \
+  cp /home/pranav/docs/openclaw-architecture.md                          "$REPO/docs/openclaw-architecture.md"
+
 # Redact secrets from openclaw.json
 python3 - <<'EOF'
 import json, re
