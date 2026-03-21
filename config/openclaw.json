@@ -51,11 +51,6 @@
       "ask": "off"
     }
   },
-  "skills": {
-    "allowBundled": [
-      "__none__"
-    ]
-  },
   "commands": {
     "native": "auto",
     "nativeSkills": "auto",
@@ -63,18 +58,25 @@
     "ownerDisplay": "raw"
   },
   "channels": {
+    "whatsapp": {
+      "enabled": true,
+      "dmPolicy": "pairing",
+      "groupPolicy": "allowlist",
+      "debounceMs": 0,
+      "mediaMaxMb": 50
+    },
     "discord": {
       "enabled": true,
       "token": "${DISCORD_BOT_TOKEN}",
       "groupPolicy": "allowlist",
       "streaming": "off",
+      "retry": {
+        "attempts": 1
+      },
       "dmPolicy": "pairing",
       "allowFrom": [
         "${DISCORD_ALLOWED_USER_ID}"
-      ],
-      "retry": {
-        "attempts": 1
-      }
+      ]
     }
   },
   "gateway": {
@@ -87,5 +89,10 @@
       "mode": "token",
       "token": "${GATEWAY_AUTH_TOKEN}"
     }
+  },
+  "skills": {
+    "allowBundled": [
+      "__none__"
+    ]
   }
 }
