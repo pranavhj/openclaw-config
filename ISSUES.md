@@ -6,8 +6,8 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 
 | ID | Type | Status | Title | Commit |
 |----|------|--------|-------|--------|
-| [OC-001](issues/OC-001-retry-attempts-not-applying.md) | bug | open | `retry.attempts=1` not applied to embedded agent (still retries 4×) | — |
-| [OC-002](issues/OC-002-rpm-exhaustion-drops-messages.md) | bug | open | RPM exhaustion silently drops messages when all fallbacks 429 | — |
+| [OC-001](issues/OC-001-retry-attempts-not-applying.md) | bug | wontfix | `retry.attempts=1` not applied to embedded agent — 4× retry hardcoded in `@google/genai` SDK, not configurable | — |
+| [OC-002](issues/OC-002-rpm-exhaustion-drops-messages.md) | bug | open | RPM exhaustion: all fallbacks 429, gateway sends error but user must resend manually | — |
 | [OC-003](issues/OC-003-allowbundled-empty-ineffective.md) | bug | fixed | `allowBundled: []` does not disable bundled skills (empty = allow all) | `init` |
 | [OC-004](issues/OC-004-session-not-cleared-before-delegate.md) | feature | fixed | Gemini accumulates cross-turn context as router (add session clear) | `init` |
 | [OC-005](issues/OC-005-bundled-skills-token-overhead.md) | feature | fixed | 55 bundled skills inflate every Gemini prompt by ~2500 tokens | `init` |

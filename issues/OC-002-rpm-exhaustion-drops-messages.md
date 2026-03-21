@@ -6,7 +6,7 @@
 
 ## Description
 
-When all models in the fallback chain hit per-minute rate limits simultaneously, the message is silently dropped — no error is sent to Discord, no retry is queued. The user has no way to know the message was lost.
+When all models in the fallback chain hit per-minute rate limits simultaneously, openclaw sends an "API rate limit" error to Discord (no `-# sent by claude` watermark — it comes from the gateway fallback). The message is effectively dropped but the user does receive an error notification.
 
 ## Observed
 

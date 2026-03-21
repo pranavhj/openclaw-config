@@ -1,7 +1,7 @@
 # OC-001 — `retry.attempts=1` not applied to embedded agent
 
 **Type:** bug
-**Status:** open
+**Status:** wontfix
 **Reported:** 2026-03-20
 
 ## Description
@@ -17,19 +17,28 @@ Gateway log for runs `ceb69fc6` and `e8130ed2` (2026-03-20 ~18:20 PDT):
 
 12 total API calls, all failing. Message dropped.
 
-## Root cause
+## Root cause (investigated 2026-03-20)
 
-`retry.attempts` under `channels.discord` likely applies to the **message delivery retry layer**, not the **model failover retry layer** inside the embedded agent runner. The model retry count is controlled by a different (possibly hardcoded) config path.
+The retry chain has two separate layers — both confirmed by source code analysis:
+
+**Layer 1: `@google/genai` SDK (`DEFAULT_RETRY_ATTEMPTS = 5`)**
+- File: `node_modules/@mariozechner/pi-ai/dist/providers/google.js` → `createClient()` calls `new GoogleGenAI({ httpOptions })`
+- File: `node_modules/@google/genai/dist/index.cjs` line 7185: `const DEFAULT_RETRY_ATTEMPTS = 5`
+- The SDK retries 429/408/500/502/503/504 automatically — 4 retries after the initial call
+- This is **not configurable** from openclaw.json — `pi-ai`'s `createClient()` does not pass `retryOptions` to the SDK
+
+**Layer 2: `channels.discord.retry.attempts` (already set to 1)**
+- Controls Discord message delivery retries (e.g., bot rate limits sending a message)
+- Does NOT affect the embedded agent model API calls
+
+**`AgentDefaultsSchema` has no retry config** — confirmed by reading full schema at line 8014. There is no `agents.defaults.retry.maxAttempts` or equivalent.
 
 ## Impact
 
-High — turns a single rate-limited request into 12 burning API calls. Directly causes OC-002.
+Each Gemini model makes up to 5 API calls (1 initial + 4 SDK retries) before failing over. With 3 model candidates: up to 15 API calls per failed message.
 
-## Fix
+## Resolution
 
-Investigate where the embedded agent retry count is configured. Possible paths:
-- `agents.defaults.retry.attempts`
-- `agents.main.retry.attempts`
-- Not configurable (hardcoded in embedded runner)
+**Not configurable** without modifying node_modules (`@mariozechner/pi-ai`). The 4 retries are intentional in the Gemini SDK for handling transient 429s from brief bursts. The problem only manifests when RPM is consistently exhausted (sustained limit, not transient burst).
 
-If not configurable, document it. If configurable, set to 1 and add to openclaw.json.
+Mitigation: Fix OC-002 (notify on failure) and avoid RPM exhaustion in the first place (don't run integration tests during active hours).
