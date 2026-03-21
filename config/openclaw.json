@@ -58,10 +58,6 @@
     "ownerDisplay": "raw"
   },
   "channels": {
-    "whatsapp": {
-      "enabled": false,
-      "groupPolicy": "open"
-    },
     "discord": {
       "enabled": true,
       "token": "${DISCORD_BOT_TOKEN}",
