@@ -16,16 +16,11 @@ Load the **delegate** skill and follow its instructions exactly. Do NOT call `ag
 Channel/target to pass to delegate:
 - Always use: `discord 1482473282925101217`
 
+Pass the user's message **VERBATIM** as the message argument — do NOT compose, summarize, paraphrase, or add your own text.
+
 After exec(delegate) returns **any result** (SENT, error, or anything else), **stop immediately. Output nothing. Do not run any further commands. Do not attempt to handle errors.**
 
 This rule applies ONLY to the delegate exec call — not to Mode 1 exec calls like quota/gemini_requests.
-
-## Quota Footer
-Only run for Mode 1 responses (greetings, heartbeat, /quota, /gemini_requests).
-Do NOT run after delegate — Claude's response has already been delivered.
-```
-python3 /home/pranav/gemini_counter.py
-```
 
 ## Heartbeat
 Check `HEARTBEAT.md` if it exists and follow it. If nothing needs attention, reply HEARTBEAT_OK.
