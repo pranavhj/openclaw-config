@@ -11,10 +11,7 @@
     "defaults": {
       "model": {
         "primary": "google/gemini-2.5-flash",
-        "fallbacks": [
-          "google/gemini-2.0-flash-lite",
-          "groq/llama-3.3-70b-versatile"
-        ]
+        "fallbacks": []
       },
       "models": {
         "ollama/qwen2.5-coder:7b": {},
