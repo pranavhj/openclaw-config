@@ -17,3 +17,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-009](issues/OC-009-standingTable-dropped-quota.md) | bug | fixed | standingTableController message silently dropped (quota exhaustion at 17:54 PDT) | `init` |
 | [OC-010](issues/OC-010-gemini-channel-misidentification.md) | bug | fixed | Gemini routed Discord message to WhatsApp (BOOT.md out of date, ambiguous channel rules) | `fix(OC-010)` |
 | [OC-011](issues/OC-011-gemini-second-turn-after-delegate.md) | bug | fixed | Gemini did second model turn after delegate (quota footer) — caused gateway error on Discord | `fix(OC-011)` |
+| [OC-012](issues/OC-012-gemini-second-turn-after-exec-error.md) | bug | fixed | Gemini did second model turn after exec(delegate) returned error — typing indicator after rate limit error | `fix(OC-012)` |
