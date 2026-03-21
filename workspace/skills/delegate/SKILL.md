@@ -22,5 +22,4 @@ Example exec call:
 
 **IMPORTANT: Pass yieldMs:120000 — do NOT use background:true or default yieldMs (10s is too short). Wait for SENT.**
 
-When exec returns with "SENT", you are done — make no further tool calls or responses.
-Append the quota footer as usual.
+When exec returns any result, stop immediately. No quota footer. No further tool calls. Claude already delivered the response.
