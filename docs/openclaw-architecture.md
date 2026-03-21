@@ -1,5 +1,5 @@
 # openclaw System Architecture
-_Last updated: 2026-03-20_
+_Last updated: 2026-03-21_
 
 ---
 
@@ -12,18 +12,16 @@ _Last updated: 2026-03-20_
 │   Discord DM ──────────────────┐                               │
 │   (allowFrom: 1277144623231537274)                             │
 │                                │                               │
-│   WhatsApp ─────────────────── ┤──► openclaw gateway          │
-│   (allowFrom: +12403967835)    │    port 18789                 │
-│                                │                               │
-│   openclaw CLI ────────────────┘                               │
-└─────────────────────────────────────────────────────────────────┘
+│   openclaw CLI ────────────────┤──► openclaw gateway           │
+│                                │    port 18789                 │
+└────────────────────────────────┼────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      GEMINI (agent:main)                        │
 │                                                                 │
 │  Model: google/gemini-2.5-flash                                │
-│  Fallbacks: gemini-2.0-flash-lite → groq/llama-3.3-70b        │
+│  Fallbacks: none                                                │
 │  Workspace: /home/pranav/.openclaw/workspace/                   │
 │  Skills: 5 workspace only (55 bundled disabled via             │
 │          allowBundled: ["__none__"])                            │
@@ -31,7 +29,7 @@ _Last updated: 2026-03-20_
 │  Reads on startup:                                              │
 │    BOOT.md     → routing rules (Mode 1/2)                      │
 │    AGENTS.md   → routing rules, group chat etiquette           │
-│    (session cleared before each turn — stateless router)        │
+│    (session resets after 5min idle — stateless router)          │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────┐           │
 │  │  MODE 1 — Trivial (Gemini handles itself)        │           │
@@ -45,10 +43,10 @@ _Last updated: 2026-03-20_
 │  │  Loads delegate skill → runs exec               │           │
 │  │  exec({command: 'delegate <ch> <tgt> <msg>',    │           │
 │  │         yieldMs: 120000})                       │           │
+│  │  Stops immediately after exec returns any result │           │
 │  └─────────────────────────────────────────────────┘           │
 │                                                                 │
-│  Every response ends with:                                      │
-│    python3 /home/pranav/gemini_counter.py  (quota footer)      │
+│  Mode 1 only: quota footer python3 gemini_counter.py           │
 └─────────────────────────────────────────────────────────────────┘
                     │ Mode 2
                     │ exec(command: 'delegate ...')
@@ -56,19 +54,17 @@ _Last updated: 2026-03-20_
 ┌─────────────────────────────────────────────────────────────────┐
 │              /home/pranav/.local/bin/delegate                   │
 │                                                                 │
-│  1. Clear Gemini session JSONL (stateless router, no history)  │
-│  2. Acquire lock: /tmp/openclaw/delegate.lock (mkdir atomic)   │
+│  1. Acquire lock: /tmp/openclaw/delegate.lock (mkdir atomic)   │
 │     └─ If locked → echo SENT, exit (prevents duplicate runs)   │
-│  3. Collect context:                                            │
+│  2. Collect context:                                            │
 │     • Projects list: ls /home/pranav/projects/                 │
-│     • Conv log: tail -30 /tmp/openclaw/openclaw-YYYY-MM-DD.log │
-│  4. Build prompt in temp file (handles special chars safely)    │
-│  5. Run Claude:                                                 │
+│  3. Build prompt in temp file (handles special chars safely)    │
+│  4. Run Claude:                                                 │
 │     cd /home/pranav/projects/openclaw                          │
 │     agent --continue --permission-mode bypassPermissions        │
 │            --print "$(cat $PROMPT_FILE)"                        │
-│  6. Log result to /tmp/openclaw/delegate-YYYY-MM-DD.log        │
-│  7. Echo output (openclaw sees "SENT")                         │
+│  5. Log result to /tmp/openclaw/delegate-YYYY-MM-DD.log        │
+│  6. Echo output (openclaw sees "SENT")                         │
 └─────────────────────────────────────────────────────────────────┘
                     │
                     ▼
@@ -82,7 +78,6 @@ _Last updated: 2026-03-20_
 │  Receives prompt with:                                          │
 │    ## Reply  (channel + target for response delivery)           │
 │    ## Known projects (list from /home/pranav/projects/)         │
-│    ## Recent conversation (last 30 log lines)                   │
 │    ## Request (user's full message verbatim)                    │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────┐           │
@@ -137,7 +132,6 @@ _Last updated: 2026-03-20_
 │                   OUTBOUND DELIVERY                             │
 │                                                                 │
 │   Discord DM ──── channel=discord, target=1482473282925101217   │
-│   WhatsApp ─────── channel=whatsapp, target=+12403967835        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -217,15 +211,18 @@ Gemini exec-dispatches directly (no delegate, no Claude):
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │  ISSUE TRACKER  (issues/OC-NNN-*.md + ISSUES.md index)   │   │
-│  │  OC-001 (open)   retry.attempts=1 not applying           │   │
-│  │  OC-002 (open)   silent drop on full RPM exhaustion      │   │
-│  │  OC-003 (fixed)  allowBundled:[] does nothing            │   │
-│  │  OC-004 (fixed)  Gemini session not cleared between turns│   │
-│  │  OC-005 (fixed)  55 bundled skills inflating tokens      │   │
-│  │  OC-006 (fixed)  AGENTS.md was 9.3KB                     │   │
-│  │  OC-007 (fixed)  route-audit used wrong working dir      │   │
-│  │  OC-008 (fixed)  no per-project session isolation        │   │
-│  │  OC-009 (fixed)  standingTable dropped (quota exhaustion)│   │
+│  │  OC-001 (wontfix) retry.attempts=1 not applying          │   │
+│  │  OC-002 (open)    RPM exhaustion → error msg to Discord  │   │
+│  │  OC-003 (fixed)   allowBundled:[] does nothing           │   │
+│  │  OC-004 (fixed)   Gemini session not cleared between turns│  │
+│  │  OC-005 (fixed)   55 bundled skills inflating tokens     │   │
+│  │  OC-006 (fixed)   AGENTS.md was 9.3KB                    │   │
+│  │  OC-007 (fixed)   route-audit used wrong working dir     │   │
+│  │  OC-008 (fixed)   no per-project session isolation       │   │
+│  │  OC-009 (fixed)   standingTable dropped (quota exhaustion)│  │
+│  │  OC-010 (fixed)   channel misidentification              │   │
+│  │  OC-011 (fixed)   Gemini second turn after delegate      │   │
+│  │  OC-012 (fixed)   Gemini second turn after exec error    │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                  │
 │  Secrets: openclaw.json stored with ${VAR} placeholders         │
@@ -241,25 +238,25 @@ Gemini exec-dispatches directly (no delegate, no Claude):
 ```
 /home/pranav/.openclaw/
 ├── openclaw.json                    ← GATEWAY CONFIG
-│   • API keys (Gemini, Groq, Ollama)
+│   • API keys (Gemini, Groq)
 │   • Agent model: gemini-2.5-flash
-│   • Fallbacks: gemini-2.0-flash-lite, groq/llama-3.3-70b
+│   • Fallbacks: none
 │   • Workspace: /home/pranav/.openclaw/workspace/
 │   • skills.allowBundled: ["__none__"]  ← disables all 55 bundled skills
-│   • Channels: discord (retry=1), whatsapp
-│   • allowFrom: user IDs/phone numbers (allowlist)
+│   • Channels: discord only (retry=1)
+│   • allowFrom: user IDs (allowlist)
 │   • Gateway port: 18789, auth token
 │   • Tools: coding profile, web search, exec security=full
+│   • session.reset.idleMinutes: 5  ← Gemini context resets after 5min idle
 │
 ├── BOOT.md                          ← GEMINI ROUTING RULES (boot-time)
 │   • Mode 1: what Gemini handles itself
-│   • Mode 2: delegate via delegate skill
-│   • Quota footer: mandatory python3 gemini_counter.py
+│   • Mode 2: delegate via delegate skill; stop after any exec result
 │
 ├── workspace/
 │   ├── AGENTS.md                    ← GEMINI WORKSPACE INSTRUCTIONS (~1.3KB)
 │   │   • Mode 1/2 routing (trimmed 86% from 9.3KB)
-│   │   • Channel/target defaults (Discord DM ID, WhatsApp number)
+│   │   • Channel/target defaults (Discord DM ID)
 │   │   • Group chat rules
 │   │   • Heartbeat instructions
 │   │
@@ -283,7 +280,7 @@ Gemini exec-dispatches directly (no delegate, no Claude):
     └── main/
         └── sessions/                ← GEMINI SESSION STORE
             ├── sessions.json        ← session index
-            └── *.jsonl              ← cleared before each delegate turn
+            └── *.jsonl              ← auto-reset after 5min idle (idleMinutes:5)
 
 /home/pranav/
 ├── CLAUDE.md                        ← DIRECT TERMINAL CLAUDE CONFIG
@@ -313,9 +310,12 @@ Gemini exec-dispatches directly (no delegate, no Claude):
 │
 └── .local/bin/
     ├── delegate                     ← DELEGATION ORCHESTRATOR
-    │   • Clears Gemini session JSONL (stateless router)
-    │   • Lock, logging, context gathering
+    │   • Lock, logging, context gathering (projects list)
     │   • Invokes: cd projects/openclaw && agent --continue
+    │
+    ├── send-gemini-stats            ← GEMINI USAGE REPORTER
+    │   • Runs gq, sends output to Discord
+    │   • Scheduled via system crontab (no Gemini dependency)
     │
     ├── run-tests                    ← FULL TEST SUITE RUNNER
     │   • SKIP_GATEWAY_RESTART=1
@@ -340,6 +340,9 @@ Gemini exec-dispatches directly (no delegate, no Claude):
 /home/pranav/.config/systemd/user/
     openclaw-config-sync.path        ← watches 12 live config files
     openclaw-config-sync.service     ← auto-sync + commit + push on change
+
+# System crontab
+7 10-23,0-1 * * *  send-gemini-stats  ← Gemini usage stats to Discord (PT)
 ```
 
 ---
@@ -348,7 +351,7 @@ Gemini exec-dispatches directly (no delegate, no Claude):
 
 | Agent | Model | Working Dir | Config | Responsibility |
 |---|---|---|---|---|
-| **Gemini** (agent:main) | gemini-2.5-flash | `.openclaw/workspace/` | BOOT.md + AGENTS.md | Stateless router: classify → load skill → exec delegate or exec-dispatch → quota footer. Session cleared before each turn. |
+| **Gemini** (agent:main) | gemini-2.5-flash | `.openclaw/workspace/` | BOOT.md + AGENTS.md | Stateless router: classify → load skill → exec delegate or exec-dispatch. Stops immediately after delegate exec returns. Session resets after 5min idle. |
 | **openclaw_claude** | claude-sonnet-4-6 | `projects/openclaw/` | `projects/openclaw/CLAUDE.md` | Entry point for all channel traffic. One-off: handles directly. Project work: spawns isolated sub-session in project dir. |
 | **Project sub-session** | claude-sonnet-4-6 | `projects/<slug>/` | `projects/CLAUDE.md` + `CLAUDE.md` | Isolated per-project Claude session. Reads PROGRESS.md, does work, updates PROGRESS.md, sends to Discord, exits. |
 | **Claude Code** (terminal) | claude-sonnet-4-6 | `/home/pranav/` | `CLAUDE.md` | Direct dev work with Pranav in terminal |
@@ -376,7 +379,7 @@ Per-request token breakdown (before → after):
 | BOOT.md | ~800 | ~800 (unchanged) |
 | AGENTS.md | ~2,300 | ~335 (trimmed 86%) |
 | 55 bundled skill definitions | ~2,500 | 0 (disabled) |
-| Gemini session history | growing | 0 (cleared each turn) |
+| Gemini session history | growing | ~0 (idleMinutes:5 resets on inactivity) |
 | **Total estimate** | **~3,934/req** | **~1,200–1,500/req** |
 
 Result: ~60–65% reduction. Daily message capacity ~263 → ~650+ at 1M TPD limit.
@@ -388,8 +391,11 @@ Result: ~60–65% reduction. Daily message capacity ~263 → ~650+ at 1M TPD lim
 **`yieldMs: 120000` on delegate exec**
 Default is 10s which backgrounds the command before Claude responds. 2 min gives Claude time to complete.
 
-**Session cleared before each delegate turn**
-Gemini is a pure router — it needs zero cross-turn context. Clearing the JSONL keeps each routing decision stateless and eliminates accumulated token overhead.
+**`session.reset.idleMinutes: 5` (stateless Gemini router)**
+Gemini is a pure router — it needs zero cross-turn context. `idleMinutes:5` resets the session after 5 minutes of inactivity, so most messages start fresh. Prior approach (truncating the JSONL mid-turn) was a no-op: openclaw writes the session back to disk at end of turn, overwriting any truncation.
+
+**Stop after any exec(delegate) result**
+BOOT.md/AGENTS.md say to stop immediately after exec(delegate) returns — regardless of whether it returned SENT or an error. Without this, Gemini ran a second model turn on failure, causing a "typing..." indicator after rate limit errors (OC-012). Mode 1 exec calls (/quota, /gemini_requests) are explicitly excluded from this stop rule.
 
 **`allowBundled: ["__none__"]` (not `[]`)**
 Empty allowlist means "allow all" in openclaw's logic. A non-empty list with no matching names disables all 55 bundled skills. Workspace skills are always allowed regardless.
@@ -412,19 +418,19 @@ Gemini was hallucinating wrong SKILL.md paths (ENOENT). Embedding the command in
 **Git integration scoped to openclaw-config only**
 Project repos (standingTableController, etc.) are not tracked — they're code, not infrastructure. openclaw-config tracks only the routing/config layer. Separate concerns.
 
+**`send-gemini-stats` via system crontab (not openclaw cron)**
+The gemini-stats openclaw cron used Gemini to exec `send-gemini-stats`. When Gemini is rate-limited, the cron itself fails. Since the script doesn't need AI, it's now a native crontab entry — no Gemini dependency.
+
 ---
 
 ## Known Risks
 
-### OC-001 — retry.attempts=1 not applying (HIGH)
-`channels.discord.retry.attempts=1` in openclaw.json has no effect on the embedded agent model retry loop, which still retries each model 4×. On rate limit: 3 models × 4 retries = 12 wasted API calls, burning RPM budget and amplifying OC-002.
+### OC-001 — retry.attempts=1 not applying (wontfix)
+`channels.discord.retry.attempts=1` in openclaw.json has no effect on the embedded agent model retry loop. Root cause: `@google/genai` SDK `DEFAULT_RETRY_ATTEMPTS=5`, not configurable via openclaw config. **Partial mitigation:** SDK patched directly (`DEFAULT_RETRY_ATTEMPTS=1` in node_modules). Note: patch is lost on `openclaw update`.
 
-### OC-002 — Silent message drop on full RPM exhaustion (HIGH)
-When all models in the fallback chain hit per-minute rate limits simultaneously, the message is silently dropped — no Discord notification, no retry queue. User has no way to know it happened.
-**Workaround:** wait 2+ minutes after integration test runs before sending real messages.
-
-### Groq fallback can't delegate (HIGH)
-When groq takes over, exec tool is not provisioned. It either responds with text or errors "exec not in request.tools". Message is lost either way.
+### OC-002 — RPM exhaustion sends error to Discord (MEDIUM)
+When all models hit rate limits, openclaw sends an "API rate limit" error message to Discord (no `-# sent by claude` watermark). Message is not silently dropped but the error UX is poor.
+**Workaround:** avoid heavy integration test runs during active use hours.
 
 ### `--continue` session context growth (MEDIUM)
 openclaw_claude accumulates session history across all Discord conversations. Over weeks/months the context window fills up.
