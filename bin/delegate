@@ -5,6 +5,15 @@ TARGET="$2"
 shift 2
 MESSAGE="$*"
 
+# Sanitize message: replace straight apostrophe/single-quote with Unicode right single
+# quotation mark (U+2019, looks identical in Discord). This is belt-and-suspenders —
+# the primary fix is in SKILL.md (never quote message with single quotes).
+# Also replaces backticks to prevent accidental old-style command substitution leakage.
+RSQUOTE=$'\xe2\x80\x99'  # U+2019 RIGHT SINGLE QUOTATION MARK
+LDQUOTE=$'\xe2\x80\x98'  # U+2018 LEFT SINGLE QUOTATION MARK (replaces backtick)
+MESSAGE="${MESSAGE//$'\''/$RSQUOTE}"
+MESSAGE="${MESSAGE//\`/$LDQUOTE}"
+
 LOGDIR="/tmp/openclaw"
 LOGFILE="$LOGDIR/delegate-$(date +%Y-%m-%d).log"
 LOCKFILE="$LOGDIR/delegate.lock"
