@@ -16,8 +16,13 @@ MESSAGE="${MESSAGE//\`/$LDQUOTE}"
 
 LOGDIR="/tmp/openclaw"
 LOGFILE="$LOGDIR/delegate-$(date +%Y-%m-%d).log"
+TIMELINE_LOG="$LOGDIR/timeline-$(date +%Y-%m-%d).log"
 LOCKFILE="$LOGDIR/delegate.lock"
 mkdir -p "$LOGDIR"
+
+# Millisecond timestamp helper
+ts_ms() { date '+%Y-%m-%dT%H:%M:%S.%3NZ' --utc; }
+TS_RECV=$(ts_ms)
 
 # Prevent duplicate concurrent runs (Gemini sometimes fires twice in background mode)
 if ! mkdir "$LOCKFILE" 2>/dev/null; then
@@ -28,7 +33,7 @@ trap "rmdir '$LOCKFILE' 2>/dev/null" EXIT
 
 PROJECTS=$(ls /home/pranav/projects/ 2>/dev/null | tr '\n' ', ')
 
-# Log the delegation
+# Log the delegation (human-readable)
 {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S %Z') ==="
   echo "channel: $CHANNEL"
@@ -37,6 +42,10 @@ PROJECTS=$(ls /home/pranav/projects/ 2>/dev/null | tr '\n' ', ')
   echo "projects: ${PROJECTS:-none}"
   echo "status: starting"
 } >> "$LOGFILE"
+
+# Timeline log (machine-parseable JSON-lines for end-to-end tracing)
+printf '{"ts":"%s","event":"delegate_recv","channel":"%s","target":"%s","msg_preview":"%s"}\n' \
+  "$TS_RECV" "$CHANNEL" "$TARGET" "${MESSAGE:0:80}" >> "$TIMELINE_LOG"
 
 # Build prompt in a temp file to safely handle special chars in $MESSAGE
 PROMPT_FILE=$(mktemp /tmp/delegate-prompt-XXXXXX.txt)
@@ -47,14 +56,28 @@ printf 'Channel: %s\nTarget: %s\n\n' "$CHANNEL" "$TARGET" >> "$PROMPT_FILE"
 printf '## Known projects in /home/pranav/projects/\n%s\n\n' "${PROJECTS:-none}" >> "$PROMPT_FILE"
 printf '## Request\n%s\n' "$MESSAGE" >> "$PROMPT_FILE"
 
+# Log agent invocation start
+TS_AGENT_START=$(ts_ms)
+printf '{"ts":"%s","event":"agent_start","channel":"%s"}\n' "$TS_AGENT_START" "$CHANNEL" >> "$TIMELINE_LOG"
+
 # Run agent — pass prompt file path, not inline expansion (avoids shell injection)
 OUTPUT=$(cd /home/pranav/projects/openclaw && agent --continue --permission-mode bypassPermissions --print "$(cat "$PROMPT_FILE")" 2>&1)
+EXIT_CODE=$?
 rm -f "$PROMPT_FILE"
 
-EXIT_CODE=$?
+TS_AGENT_DONE=$(ts_ms)
+DURATION_MS=$(( $(date -d "$TS_AGENT_DONE" +%s%3N 2>/dev/null || echo 0) - $(date -d "$TS_AGENT_START" +%s%3N 2>/dev/null || echo 0) ))
 
-# Log the result
+# Log agent return
+printf '{"ts":"%s","event":"agent_done","exit_code":%d,"output":"%s","duration_ms":%d}\n' \
+  "$TS_AGENT_DONE" "$EXIT_CODE" "${OUTPUT:0:40}" "$DURATION_MS" >> "$TIMELINE_LOG"
+
+# Log the result (human-readable)
 {
+  echo "ts_recv: $TS_RECV"
+  echo "ts_agent_start: $TS_AGENT_START"
+  echo "ts_agent_done: $TS_AGENT_DONE"
+  echo "duration_ms: $DURATION_MS"
   echo "exit_code: $EXIT_CODE"
   echo "output: $OUTPUT"
   echo "status: done"
