@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+"""
+openclaw-timeline — end-to-end trace of a message through the openclaw pipeline.
+
+Shows: Discord recv → Gemini turn start → skill loaded → exec delegate →
+       agent start → agent done (SENT) → Gemini stop (or continued responding)
+
+Usage:
+  openclaw-timeline [DATE]        # show today's timeline (or DATE: YYYY-MM-DD)
+  openclaw-timeline --last N      # show last N delegate runs
+  openclaw-timeline --follow      # tail the timeline log live
+"""
+
+import sys
+import json
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+DATE = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+LOGDIR = Path("/tmp/openclaw")
+SESSIONS_DIR = Path.home() / ".openclaw/agents/main/sessions"
+
+# Parse args
+args = sys.argv[1:]
+last_n = None
+follow = False
+if "--follow" in args:
+    follow = True
+    args.remove("--follow")
+if "--last" in args:
+    idx = args.index("--last")
+    last_n = int(args[idx + 1]) if idx + 1 < len(args) else 5
+    args = args[:idx]
+if args:
+    DATE = args[0]
+
+
+def parse_ts(ts_str):
+    """Parse ISO timestamp → datetime."""
+    if not ts_str:
+        return None
+    try:
+        ts_str = ts_str.rstrip("Z")
+        if "." in ts_str:
+            return datetime.fromisoformat(ts_str + "+00:00")
+        return datetime.fromisoformat(ts_str + "+00:00")
+    except Exception:
+        return None
+
+
+def fmt_ts(dt, short=False):
+    if dt is None:
+        return "?"
+    if short:
+        return dt.strftime("%H:%M:%S.%f")[:-3]
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def ms_diff(t1, t2):
+    if t1 is None or t2 is None:
+        return "?"
+    delta = (t2 - t1).total_seconds() * 1000
+    return f"+{delta:.0f}ms"
+
+
+def load_timeline_events(date):
+    """Load timeline JSONL events from delegate script."""
+    path = LOGDIR / f"timeline-{date}.log"
+    events = []
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except Exception:
+                pass
+    return events
+
+
+def load_gateway_events(date):
+    """Load relevant gateway log events — exec calls, Discord sends, model changes, errors."""
+    path = LOGDIR / f"openclaw-{date}.log"
+    events = []
+    if not path.exists():
+        return events
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+            meta = d.get("_meta", {})
+            ts = meta.get("date", "")
+            level = meta.get("logLevelName", "")
+            msg0 = str(d.get("0", ""))
+            msg1 = str(d.get("1", ""))
+            msg2 = str(d.get("2", ""))
+
+            ev = None
+
+            # Discord send confirmation
+            if "✅ Sent via Discord" in msg0:
+                mid = re.search(r"Message ID: (\d+)", msg0)
+                ev = {"ts": ts, "event": "discord_send", "msg_id": mid.group(1) if mid else "?"}
+
+            # Exec command (delegate invocation by Gemini)
+            elif "subsystem" in msg0 and "exec" in msg0 and "delegate" in msg1:
+                ev = {"ts": ts, "event": "gemini_exec_delegate", "cmd_preview": msg1[:100]}
+
+            # Skill dispatch — skill loaded
+            elif "SKILL-DISPATCH-DEBUG" in msg0 and "loadSkillEntries" in msg0:
+                names_match = re.search(r'names=\[([^\]]*)\]', msg0)
+                ev = {"ts": ts, "event": "skills_loaded", "count": len(names_match.group(1).split(",")) if names_match else "?"}
+
+            # Skill invocation result
+            elif "SKILL-DISPATCH-DEBUG" in msg0 and "skillInvocation result" in msg0:
+                invoked = "invocation=null" not in msg0
+                ev = {"ts": ts, "event": "skill_invoked" if invoked else "skill_not_invoked",
+                      "detail": msg0[msg0.find("skillInvocation"):msg0.find("skillInvocation") + 80]}
+
+            # Model change / 429 error
+            elif level == "ERROR" or ('"error"' in line and "429" in line):
+                ev = {"ts": ts, "event": "model_error", "detail": (msg0 + " " + msg1)[:120]}
+
+            # Web heartbeat — skip
+            elif "web-heartbeat" in msg0 or "cron: timer armed" in msg2:
+                continue
+
+            if ev:
+                events.append(ev)
+        except Exception:
+            pass
+    return events
+
+
+def load_gemini_sessions(date):
+    """Extract key events from Gemini session JSONL files for the given date."""
+    sessions = []
+    if not SESSIONS_DIR.exists():
+        return sessions
+
+    for jfile in sorted(SESSIONS_DIR.glob("*.jsonl")):
+        if jfile.suffix == ".lock" or jfile.name == "sessions.json":
+            continue
+        try:
+            lines = jfile.read_text().splitlines()
+            if not lines:
+                continue
+            # Check if session is from our date
+            first_ts = None
+            events = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                ts = d.get("timestamp", "")
+                if not ts:
+                    continue
+                if first_ts is None:
+                    first_ts = ts
+                    if not ts.startswith(date):
+                        break  # wrong date, skip rest of file
+
+                t = d.get("type", "")
+                if t == "model_change":
+                    events.append({"ts": ts, "event": "gemini_model", "model": d.get("modelId", "")})
+                elif t == "message":
+                    msg = d.get("message", {})
+                    role = msg.get("role", "")
+                    content = msg.get("content", [])
+                    text = ""
+                    has_tool_use = False
+                    tool_names = []
+                    if isinstance(content, list):
+                        for p in content:
+                            if isinstance(p, dict):
+                                if p.get("type") == "text":
+                                    text = p.get("text", "")[:80]
+                                elif p.get("type") == "tool_use":
+                                    has_tool_use = True
+                                    tool_names.append(p.get("name", "?"))
+                                    inp = p.get("input", {})
+                                    cmd = inp.get("command", inp.get("cmd", ""))
+                                    if cmd:
+                                        text = f"exec: {cmd[:80]}"
+                    if role == "user":
+                        events.append({"ts": ts, "event": "gemini_user_msg", "preview": text[:60]})
+                    elif role == "assistant":
+                        if has_tool_use:
+                            events.append({"ts": ts, "event": "gemini_tool_call",
+                                           "tools": tool_names, "preview": text[:60]})
+                        elif text.strip():
+                            events.append({"ts": ts, "event": "gemini_text_response",
+                                           "preview": text[:60]})
+
+            if events and first_ts and first_ts.startswith(date):
+                sessions.append({"file": jfile.name, "events": events})
+        except Exception:
+            pass
+    return sessions
+
+
+def render_timeline(date):
+    tl_events = load_timeline_events(date)
+    gw_events = load_gateway_events(date)
+    gem_sessions = load_gemini_sessions(date)
+
+    # Group delegate runs by recv event
+    delegate_runs = []
+    current_run = None
+    for ev in tl_events:
+        if ev.get("event") == "delegate_recv":
+            if current_run:
+                delegate_runs.append(current_run)
+            current_run = {"recv": ev, "events": [ev]}
+        elif current_run:
+            current_run["events"].append(ev)
+    if current_run:
+        delegate_runs.append(current_run)
+
+    if not delegate_runs and not gw_events and not gem_sessions:
+        print(f"No timeline data for {date}")
+        return
+
+    print(f"{'═' * 70}")
+    print(f"  openclaw timeline — {date}")
+    print(f"{'═' * 70}")
+
+    # If we have delegate runs, show them with context
+    if delegate_runs:
+        print(f"\n{'─' * 70}")
+        print(f"  DELEGATE RUNS ({len(delegate_runs)} total)")
+        print(f"{'─' * 70}")
+        for run in delegate_runs:
+            recv = run["recv"]
+            t0 = parse_ts(recv.get("ts"))
+            ch = recv.get("channel", "?")
+            msg = recv.get("msg_preview", "")[:50]
+
+            print(f"\n  [{fmt_ts(t0, short=True)}] ▶ RECV via {ch}: {msg}...")
+
+            agent_start = None
+            agent_done = None
+            for ev in run["events"]:
+                t = parse_ts(ev.get("ts"))
+                etype = ev.get("event", "")
+                lag = ms_diff(t0, t)
+
+                if etype == "delegate_recv":
+                    continue
+                elif etype == "agent_start":
+                    agent_start = t
+                    print(f"  [{fmt_ts(t, short=True)}] {lag:>8}  → agent invoked (Claude)")
+                elif etype == "agent_done":
+                    agent_done = t
+                    ec = ev.get("exit_code", "?")
+                    out = ev.get("output", "")[:30]
+                    dur = ev.get("duration_ms", "?")
+                    status = "✓ SENT" if "SENT" in str(out) else f"✗ {out}"
+                    print(f"  [{fmt_ts(t, short=True)}] {lag:>8}  ← agent done [{status}] exit={ec} agent_time={dur}ms")
+
+            if agent_start and agent_done:
+                total = ms_diff(t0, agent_done)
+                print(f"  {'─' * 50}")
+                print(f"  Total wall time: {total}  |  Agent time: {ms_diff(agent_start, agent_done)}")
+
+    # Gemini session events
+    if gem_sessions:
+        print(f"\n{'─' * 70}")
+        print(f"  GEMINI SESSIONS ({len(gem_sessions)} today)")
+        print(f"{'─' * 70}")
+        for sess in gem_sessions[-5:]:  # last 5 sessions
+            print(f"\n  Session: {sess['file']}")
+            for ev in sess["events"]:
+                t = parse_ts(ev.get("ts"))
+                etype = ev.get("event", "")
+                ts_str = fmt_ts(t, short=True)
+
+                if etype == "gemini_model":
+                    print(f"  [{ts_str}]  MODEL: {ev.get('model', '?')}")
+                elif etype == "gemini_user_msg":
+                    print(f"  [{ts_str}]  ↓ USER:  {ev.get('preview', '')[:60]}")
+                elif etype == "gemini_tool_call":
+                    tools = ", ".join(ev.get("tools", []))
+                    prev = ev.get("preview", "")
+                    print(f"  [{ts_str}]  ⚙ EXEC: [{tools}] {prev[:50]}")
+                elif etype == "gemini_text_response":
+                    prev = ev.get("preview", "")
+                    flag = " ⚠ GEMINI ANSWERED DIRECTLY" if prev.strip() else ""
+                    print(f"  [{ts_str}]  ✍ TEXT:{flag} {prev[:50]}")
+                elif etype == "model_error":
+                    print(f"  [{ts_str}]  ✗ ERR:  {ev.get('detail', '')[:60]}")
+
+    # Gateway exec/send events (not already shown)
+    exec_events = [e for e in gw_events if e.get("event") in
+                   ("gemini_exec_delegate", "discord_send", "skills_loaded",
+                    "skill_invoked", "skill_not_invoked")]
+    if exec_events:
+        print(f"\n{'─' * 70}")
+        print(f"  GATEWAY EVENTS ({len(exec_events)} key events)")
+        print(f"{'─' * 70}")
+        for ev in exec_events[-20:]:
+            t = parse_ts(ev.get("ts"))
+            etype = ev.get("event", "")
+            ts_str = fmt_ts(t, short=True)
+            if etype == "gemini_exec_delegate":
+                print(f"  [{ts_str}]  ⚙ GEMINI exec delegate: {ev.get('cmd_preview', '')[:60]}")
+            elif etype == "discord_send":
+                print(f"  [{ts_str}]  ✅ Discord sent (msg {ev.get('msg_id', '?')})")
+            elif etype == "skills_loaded":
+                print(f"  [{ts_str}]  📦 Skills loaded: {ev.get('count', '?')} entries")
+            elif etype == "skill_invoked":
+                print(f"  [{ts_str}]  ▶ Skill invoked: {ev.get('detail', '')[:60]}")
+            elif etype == "skill_not_invoked":
+                print(f"  [{ts_str}]  ○ No skill matched (text response path)")
+
+    print(f"\n{'═' * 70}\n")
+
+
+if follow:
+    import time
+    print(f"Following timeline log (Ctrl+C to stop)...")
+    tl_path = LOGDIR / f"timeline-{DATE}.log"
+    seen = set()
+    while True:
+        try:
+            if tl_path.exists():
+                for line in tl_path.read_text().splitlines():
+                    if line and line not in seen:
+                        seen.add(line)
+                        try:
+                            ev = json.loads(line)
+                            t = parse_ts(ev.get("ts"))
+                            print(f"[{fmt_ts(t, short=True)}] {ev.get('event','?'):25} {json.dumps({k:v for k,v in ev.items() if k not in ('ts','event')})}")
+                        except Exception:
+                            pass
+            time.sleep(1)
+        except KeyboardInterrupt:
+            break
+else:
+    render_timeline(DATE)
