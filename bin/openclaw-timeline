@@ -111,10 +111,14 @@ def load_gateway_events(date):
             elif "subsystem" in msg0 and "exec" in msg0 and "delegate" in msg1:
                 ev = {"ts": ts, "event": "gemini_exec_delegate", "cmd_preview": msg1[:100]}
 
-            # Skill dispatch — skill loaded
+            # Skill dispatch — NEW MESSAGE received, skills being loaded (= Gemini turn start)
             elif "SKILL-DISPATCH-DEBUG" in msg0 and "loadSkillEntries" in msg0:
                 names_match = re.search(r'names=\[([^\]]*)\]', msg0)
-                ev = {"ts": ts, "event": "skills_loaded", "count": len(names_match.group(1).split(",")) if names_match else "?"}
+                body_match = re.search(r'body=([^\n"]{0,60})', msg0)
+                body = body_match.group(1).strip() if body_match else ""
+                ev = {"ts": ts, "event": "gemini_turn_start",
+                      "count": len(names_match.group(1).split(",")) if names_match else "?",
+                      "msg_preview": body}
 
             # Skill invocation result
             elif "SKILL-DISPATCH-DEBUG" in msg0 and "skillInvocation result" in msg0:
@@ -137,8 +141,31 @@ def load_gateway_events(date):
     return events
 
 
+def group_gateway_turns(gw_events):
+    """Group gateway events into per-message turns using gemini_turn_start as boundaries."""
+    turns = []
+    current = None
+    for ev in gw_events:
+        if ev.get("event") == "gemini_turn_start":
+            if current:
+                turns.append(current)
+            current = {"start": ev, "events": [ev]}
+        elif current:
+            current["events"].append(ev)
+    if current:
+        turns.append(current)
+    return turns
+
+
 def load_gemini_sessions(date):
-    """Extract key events from Gemini session JSONL files for the given date."""
+    """Extract key events from Gemini session JSONL files for the given date.
+
+    Each session is a series of turns. For each user message, we track:
+      - ts_user_msg: when Gemini received the message (turn start)
+      - ts_tool_call: when Gemini fired exec (end of processing window)
+      - ts_tool_result: when exec returned
+      - ts_text_response: if Gemini produced text (expected: never after delegate)
+    """
     sessions = []
     if not SESSIONS_DIR.exists():
         return sessions
@@ -150,9 +177,10 @@ def load_gemini_sessions(date):
             lines = jfile.read_text().splitlines()
             if not lines:
                 continue
-            # Check if session is from our date
             first_ts = None
             events = []
+            current_model = "?"
+
             for line in lines:
                 if not line.strip():
                     continue
@@ -166,11 +194,12 @@ def load_gemini_sessions(date):
                 if first_ts is None:
                     first_ts = ts
                     if not ts.startswith(date):
-                        break  # wrong date, skip rest of file
+                        break
 
                 t = d.get("type", "")
                 if t == "model_change":
-                    events.append({"ts": ts, "event": "gemini_model", "model": d.get("modelId", "")})
+                    current_model = d.get("modelId", "?")
+                    events.append({"ts": ts, "event": "gemini_model", "model": current_model})
                 elif t == "message":
                     msg = d.get("message", {})
                     role = msg.get("role", "")
@@ -178,41 +207,94 @@ def load_gemini_sessions(date):
                     text = ""
                     has_tool_use = False
                     tool_names = []
+                    tool_cmd = ""
                     if isinstance(content, list):
                         for p in content:
                             if isinstance(p, dict):
                                 if p.get("type") == "text":
                                     text = p.get("text", "")[:80]
-                                elif p.get("type") == "tool_use":
+                                elif p.get("type") in ("tool_use", "toolCall"):
                                     has_tool_use = True
                                     tool_names.append(p.get("name", "?"))
-                                    inp = p.get("input", {})
-                                    cmd = inp.get("command", inp.get("cmd", ""))
-                                    if cmd:
-                                        text = f"exec: {cmd[:80]}"
+                                    # tool_use uses 'input', toolCall uses 'arguments'
+                                    inp = p.get("input", p.get("arguments", {}))
+                                    tool_cmd = inp.get("command", inp.get("cmd", ""))[:80]
                     if role == "user":
-                        events.append({"ts": ts, "event": "gemini_user_msg", "preview": text[:60]})
+                        # Strip system/cron noise for preview
+                        preview = text.strip()
+                        if preview.startswith("System:") or "cron:" in preview:
+                            preview = preview[:40] + " [system]"
+                        events.append({"ts": ts, "event": "gemini_user_msg",
+                                       "preview": preview[:60], "model": current_model})
                     elif role == "assistant":
                         if has_tool_use:
                             events.append({"ts": ts, "event": "gemini_tool_call",
-                                           "tools": tool_names, "preview": text[:60]})
+                                           "tools": tool_names, "cmd": tool_cmd,
+                                           "model": current_model})
                         elif text.strip():
                             events.append({"ts": ts, "event": "gemini_text_response",
-                                           "preview": text[:60]})
+                                           "preview": text[:60], "model": current_model})
+                elif t == "custom" and d.get("customType") == "tool-result":
+                    result_str = str(d.get("data", {}).get("result", ""))[:60]
+                    events.append({"ts": ts, "event": "gemini_tool_result",
+                                   "result": result_str})
 
             if events and first_ts and first_ts.startswith(date):
-                sessions.append({"file": jfile.name, "events": events})
+                sessions.append({"file": jfile.name, "first_ts": first_ts, "events": events})
         except Exception:
             pass
     return sessions
+
+
+def build_gemini_turns(sessions):
+    """From session events, build per-message turns with processing window metrics."""
+    turns = []
+    for sess in sessions:
+        turn = None
+        for ev in sess["events"]:
+            etype = ev.get("event", "")
+            if etype == "gemini_user_msg":
+                if turn:
+                    turns.append(turn)
+                turn = {
+                    "ts_recv": ev["ts"],
+                    "msg_preview": ev.get("preview", ""),
+                    "model": ev.get("model", "?"),
+                    "ts_exec": None,
+                    "ts_exec_result": None,
+                    "ts_text": None,
+                    "exec_cmd": "",
+                    "text_after_exec": None,
+                    "session": sess["file"],
+                    "errors": [],
+                }
+            elif turn:
+                if etype == "gemini_tool_call":
+                    turn["ts_exec"] = ev["ts"]
+                    turn["exec_cmd"] = ev.get("cmd", "")
+                elif etype == "gemini_tool_result":
+                    turn["ts_exec_result"] = ev["ts"]
+                elif etype == "gemini_text_response":
+                    if turn["ts_exec"]:  # text AFTER exec = bug
+                        turn["text_after_exec"] = ev.get("preview", "")
+                    turn["ts_text"] = ev["ts"]
+                elif etype == "model_error":
+                    turn["errors"].append(ev.get("detail", ""))
+        if turn:
+            turns.append(turn)
+    return turns
 
 
 def render_timeline(date):
     tl_events = load_timeline_events(date)
     gw_events = load_gateway_events(date)
     gem_sessions = load_gemini_sessions(date)
+    gem_turns = build_gemini_turns(gem_sessions)
 
-    # Group delegate runs by recv event
+    # Group gateway events into per-turn blocks (from SKILL-DISPATCH-DEBUG if available)
+    gw_turns = group_gateway_turns(gw_events)
+
+    # Group delegate runs by recv event (from timeline JSONL)
     delegate_runs = []
     current_run = None
     for ev in tl_events:
@@ -225,29 +307,146 @@ def render_timeline(date):
     if current_run:
         delegate_runs.append(current_run)
 
-    if not delegate_runs and not gw_events and not gem_sessions:
+    if not gw_turns and not delegate_runs and not gem_sessions and not gem_turns:
         print(f"No timeline data for {date}")
         return
 
-    print(f"{'═' * 70}")
+    print(f"{'═' * 72}")
     print(f"  openclaw timeline — {date}")
-    print(f"{'═' * 70}")
+    print(f"  Phases: [G=Gemini processing] [D=Delegate overhead] [A=Agent/Claude]")
+    print(f"{'═' * 72}")
 
-    # If we have delegate runs, show them with context
+    # ── Gemini processing window (from session JSONLs) ─────────────────────────
+    delegate_turns = [t for t in gem_turns if t.get("ts_exec") and "delegate" in t.get("exec_cmd", "")]
+    if gem_turns:
+        print(f"\n{'─' * 72}")
+        print(f"  GEMINI PROCESSING WINDOW  ({len(delegate_turns)} delegated, {len(gem_turns)} total turns)")
+        print(f"  [G] = time Gemini spent thinking before firing exec")
+        print(f"{'─' * 72}")
+        for turn in gem_turns[-12:]:
+            t_recv = parse_ts(turn["ts_recv"])
+            t_exec = parse_ts(turn.get("ts_exec"))
+            t_result = parse_ts(turn.get("ts_exec_result"))
+            t_text = parse_ts(turn.get("ts_text"))
+            model = turn.get("model", "?").replace("gemini-", "")
+            msg = turn.get("msg_preview", "")[:50]
+            cmd = turn.get("exec_cmd", "")[:50]
+            errors = turn.get("errors", [])
+            text_after = turn.get("text_after_exec")
+
+            recv_str = fmt_ts(t_recv, short=True)
+
+            if t_exec:
+                think_ms = ms_diff(t_recv, t_exec)
+                result_ms = ms_diff(t_exec, t_result) if t_result else "?"
+                status = "✓ delegated"
+            elif errors:
+                think_ms = "ERR"
+                result_ms = "—"
+                status = f"✗ {errors[0][:40]}"
+            else:
+                think_ms = "—"
+                result_ms = "—"
+                status = "○ text only"
+
+            print(f"  [{recv_str}]  [{model}]  [G={think_ms}]  {status}")
+            if cmd:
+                print(f"  {'':14}  cmd: {cmd}")
+            if t_result:
+                print(f"  {'':14}  exec returned in {result_ms}")
+            if text_after is not None:
+                print(f"  {'':14}  ⚠ GEMINI TEXT AFTER EXEC: \"{text_after[:50]}\"")
+            if errors:
+                for e in errors[:2]:
+                    print(f"  {'':14}  ✗ {e[:60]}")
+
+        # Summary stats
+        think_times = []
+        for t in delegate_turns:
+            t_recv = parse_ts(t["ts_recv"])
+            t_exec = parse_ts(t.get("ts_exec"))
+            if t_recv and t_exec:
+                ms = (t_exec - t_recv).total_seconds() * 1000
+                think_times.append(ms)
+        if think_times:
+            avg = sum(think_times) / len(think_times)
+            print(f"\n  Gemini processing window — avg: {avg:.0f}ms  "
+                  f"min: {min(think_times):.0f}ms  max: {max(think_times):.0f}ms  "
+                  f"(n={len(think_times)})")
+
+    # ── Per-turn gateway view (from SKILL-DISPATCH-DEBUG if available) ─────────
+    if gw_turns:
+        print(f"\n{'─' * 72}")
+        print(f"  GATEWAY TURNS  ({len(gw_turns)} turns — shows Gemini processing window)")
+        print(f"{'─' * 72}")
+        for turn in gw_turns[-10:]:  # last 10 turns
+            start_ev = turn["start"]
+            t_turn = parse_ts(start_ev.get("ts"))
+            msg_prev = start_ev.get("msg_preview", "")[:55]
+            skill_count = start_ev.get("count", "?")
+
+            print(f"\n  [{fmt_ts(t_turn, short=True)}] ▶ MSG RECV  {msg_prev}...")
+            print(f"  {'':14}  skills={skill_count}")
+
+            t_exec = None
+            t_discord = None
+            skill_matched = None
+            errors = []
+
+            for ev in turn["events"]:
+                t = parse_ts(ev.get("ts"))
+                etype = ev.get("event", "")
+
+                if etype == "gemini_turn_start":
+                    continue
+                elif etype == "skill_invoked":
+                    skill_matched = True
+                elif etype == "skill_not_invoked":
+                    skill_matched = False
+                elif etype == "gemini_exec_delegate":
+                    t_exec = t
+                    gemini_think = ms_diff(t_turn, t_exec)
+                    print(f"  [{fmt_ts(t_exec, short=True)}] {gemini_think:>8}  [G] Gemini exec delegate")
+                elif etype == "discord_send":
+                    t_discord = t
+                    total = ms_diff(t_turn, t_discord)
+                    print(f"  [{fmt_ts(t_discord, short=True)}] {total:>8}  ✅ Discord sent (msg {ev.get('msg_id','?')})")
+                elif etype == "model_error":
+                    errors.append(ev.get("detail", "")[:60])
+
+            if skill_matched is not None:
+                matched_str = "✓ delegate skill matched" if skill_matched else "○ no skill — text response"
+                print(f"  {'':14}  {matched_str}")
+
+            if errors:
+                for err in errors[:3]:
+                    print(f"  {'':14}  ✗ ERR: {err}")
+
+            # Summary line
+            parts = []
+            if t_exec:
+                parts.append(f"Gemini think: {ms_diff(t_turn, t_exec)}")
+            if t_discord:
+                parts.append(f"Total: {ms_diff(t_turn, t_discord)}")
+            if parts:
+                print(f"  {'─' * 55}")
+                print(f"  {' | '.join(parts)}")
+
+    # ── Delegate script timing (from timeline JSONL, populated from next run) ──
     if delegate_runs:
-        print(f"\n{'─' * 70}")
-        print(f"  DELEGATE RUNS ({len(delegate_runs)} total)")
-        print(f"{'─' * 70}")
+        print(f"\n{'─' * 72}")
+        print(f"  DELEGATE RUNS  ({len(delegate_runs)} — from delegate timeline log)")
+        print(f"{'─' * 72}")
         for run in delegate_runs:
             recv = run["recv"]
             t0 = parse_ts(recv.get("ts"))
             ch = recv.get("channel", "?")
             msg = recv.get("msg_preview", "")[:50]
 
-            print(f"\n  [{fmt_ts(t0, short=True)}] ▶ RECV via {ch}: {msg}...")
+            print(f"\n  [{fmt_ts(t0, short=True)}] ▶ delegate_recv via {ch}: {msg}...")
 
-            agent_start = None
-            agent_done = None
+            t_agent_start = None
+            t_agent_done = None
             for ev in run["events"]:
                 t = parse_ts(ev.get("ts"))
                 etype = ev.get("event", "")
@@ -256,72 +455,59 @@ def render_timeline(date):
                 if etype == "delegate_recv":
                     continue
                 elif etype == "agent_start":
-                    agent_start = t
-                    print(f"  [{fmt_ts(t, short=True)}] {lag:>8}  → agent invoked (Claude)")
+                    t_agent_start = t
+                    print(f"  [{fmt_ts(t, short=True)}] {lag:>8}  [D] overhead → agent invoked (Claude)")
                 elif etype == "agent_done":
-                    agent_done = t
+                    t_agent_done = t
                     ec = ev.get("exit_code", "?")
                     out = ev.get("output", "")[:30]
                     dur = ev.get("duration_ms", "?")
                     status = "✓ SENT" if "SENT" in str(out) else f"✗ {out}"
-                    print(f"  [{fmt_ts(t, short=True)}] {lag:>8}  ← agent done [{status}] exit={ec} agent_time={dur}ms")
+                    print(f"  [{fmt_ts(t, short=True)}] {lag:>8}  [A] agent done [{status}] exit={ec} agent_ms={dur}")
 
-            if agent_start and agent_done:
-                total = ms_diff(t0, agent_done)
-                print(f"  {'─' * 50}")
-                print(f"  Total wall time: {total}  |  Agent time: {ms_diff(agent_start, agent_done)}")
+            if t_agent_start and t_agent_done:
+                parts = [
+                    f"Delegate overhead: {ms_diff(t0, t_agent_start)}",
+                    f"Agent time: {ms_diff(t_agent_start, t_agent_done)}",
+                    f"Total: {ms_diff(t0, t_agent_done)}",
+                ]
+                print(f"  {'─' * 55}")
+                print(f"  {' | '.join(parts)}")
 
-    # Gemini session events
+    # ── Gemini sessions — model used, tool calls, post-delegate text ───────────
     if gem_sessions:
-        print(f"\n{'─' * 70}")
-        print(f"  GEMINI SESSIONS ({len(gem_sessions)} today)")
-        print(f"{'─' * 70}")
-        for sess in gem_sessions[-5:]:  # last 5 sessions
+        print(f"\n{'─' * 72}")
+        print(f"  GEMINI SESSIONS  ({len(gem_sessions)} today — tool calls & post-delegate behavior)")
+        print(f"{'─' * 72}")
+        for sess in gem_sessions[-5:]:
             print(f"\n  Session: {sess['file']}")
+            t_last_exec = None
             for ev in sess["events"]:
                 t = parse_ts(ev.get("ts"))
                 etype = ev.get("event", "")
                 ts_str = fmt_ts(t, short=True)
 
                 if etype == "gemini_model":
-                    print(f"  [{ts_str}]  MODEL: {ev.get('model', '?')}")
+                    print(f"  [{ts_str}]  MODEL  {ev.get('model', '?')}")
                 elif etype == "gemini_user_msg":
-                    print(f"  [{ts_str}]  ↓ USER:  {ev.get('preview', '')[:60]}")
+                    print(f"  [{ts_str}]  ↓ USER  {ev.get('preview', '')[:60]}")
                 elif etype == "gemini_tool_call":
                     tools = ", ".join(ev.get("tools", []))
                     prev = ev.get("preview", "")
-                    print(f"  [{ts_str}]  ⚙ EXEC: [{tools}] {prev[:50]}")
+                    t_last_exec = t
+                    print(f"  [{ts_str}]  ⚙ EXEC  [{tools}] {prev[:50]}")
                 elif etype == "gemini_text_response":
                     prev = ev.get("preview", "")
-                    flag = " ⚠ GEMINI ANSWERED DIRECTLY" if prev.strip() else ""
-                    print(f"  [{ts_str}]  ✍ TEXT:{flag} {prev[:50]}")
+                    # Flag if Gemini responded with text AFTER an exec call
+                    if t_last_exec is not None:
+                        lag = ms_diff(t_last_exec, t)
+                        print(f"  [{ts_str}]  ⚠ TEXT AFTER EXEC ({lag})  \"{prev[:50]}\"")
+                    else:
+                        print(f"  [{ts_str}]  ✍ TEXT (no prior exec)  \"{prev[:50]}\"")
                 elif etype == "model_error":
-                    print(f"  [{ts_str}]  ✗ ERR:  {ev.get('detail', '')[:60]}")
+                    print(f"  [{ts_str}]  ✗ ERR  {ev.get('detail', '')[:60]}")
 
-    # Gateway exec/send events (not already shown)
-    exec_events = [e for e in gw_events if e.get("event") in
-                   ("gemini_exec_delegate", "discord_send", "skills_loaded",
-                    "skill_invoked", "skill_not_invoked")]
-    if exec_events:
-        print(f"\n{'─' * 70}")
-        print(f"  GATEWAY EVENTS ({len(exec_events)} key events)")
-        print(f"{'─' * 70}")
-        for ev in exec_events[-20:]:
-            t = parse_ts(ev.get("ts"))
-            etype = ev.get("event", "")
-            ts_str = fmt_ts(t, short=True)
-            if etype == "gemini_exec_delegate":
-                print(f"  [{ts_str}]  ⚙ GEMINI exec delegate: {ev.get('cmd_preview', '')[:60]}")
-            elif etype == "discord_send":
-                print(f"  [{ts_str}]  ✅ Discord sent (msg {ev.get('msg_id', '?')})")
-            elif etype == "skills_loaded":
-                print(f"  [{ts_str}]  📦 Skills loaded: {ev.get('count', '?')} entries")
-            elif etype == "skill_invoked":
-                print(f"  [{ts_str}]  ▶ Skill invoked: {ev.get('detail', '')[:60]}")
-            elif etype == "skill_not_invoked":
-                print(f"  [{ts_str}]  ○ No skill matched (text response path)")
-
-    print(f"\n{'═' * 70}\n")
+    print(f"\n{'═' * 72}\n")
 
 
 if follow:
