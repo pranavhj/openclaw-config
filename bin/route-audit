@@ -16,6 +16,14 @@ else
     DELEGATE_LOG="(no delegate log for $DATE)"
 fi
 
+# Gather timeline log (machine-parseable JSON-lines)
+TIMELINE_LOG=""
+if [ -f "$LOGDIR/timeline-$DATE.log" ]; then
+    TIMELINE_LOG=$(cat "$LOGDIR/timeline-$DATE.log")
+else
+    TIMELINE_LOG="(no timeline log for $DATE)"
+fi
+
 # Gather openclaw gateway log — only exec and Discord send lines
 GATEWAY_LOG=""
 if [ -f "$LOGDIR/openclaw-$DATE.log" ]; then
@@ -82,6 +90,11 @@ for f in sorted(glob.glob(os.path.join(sessions_dir, '*.jsonl'))):
                     if ct == 'text':
                         text = c.get('text','').replace(chr(10),' ')[:120]
                         events.append(f'  [{ts}] {role}: {text}')
+                    elif ct == 'toolCall':
+                        name = c.get('name','')
+                        args = c.get('arguments',{})
+                        cmd = args.get('command','')[:150] if isinstance(args, dict) else str(args)[:150]
+                        events.append(f'  [{ts}] TOOL_CALL {name}: {cmd}')
                     elif ct == 'tool_use':
                         name = c.get('name','')
                         inp = str(c.get('input',''))[:150]
@@ -96,6 +109,7 @@ print(chr(10).join(results) if results else '(no sessions for this date)')
 " 2>/dev/null)
 
 # Current state of routing files
+AGENTS_CONTENT=$(cat "$HOME/.openclaw/workspace/AGENTS.md" 2>/dev/null || echo "(missing)")
 SKILL_CONTENT=$(cat "$HOME/.openclaw/workspace/skills/delegate/SKILL.md" 2>/dev/null || echo "(missing)")
 
 # Build prompt file
@@ -105,39 +119,56 @@ cat > "$PROMPT_FILE" << 'PROMPT_HEADER'
 You are auditing the openclaw routing system. Analyze the logs below and:
 
 1. For each user request, determine: was it delegated to Claude (correct) or answered by Gemini directly (incorrect)?
-2. Flag any errors — rate limits, empty responses, background exec (should be foreground), missing skill loads
-3. If you find a simple fix (editing AGENTS.md, skill files, or other .md config files), make the fix directly
-4. Send a concise summary to Discord with findings using: openclaw message send --channel discord --target 1482473282925101217 --message "<summary>"
+2. Check the timeline log for end-to-end timing of each delegation (delegate_recv → sanitize → agent_start → agent_done → delegate_exit)
+3. Flag any errors — rate limits, empty responses, background exec, newline failures (exit 127), missing delegations
+4. If you find a simple fix (editing AGENTS.md, skill files, or other .md config files), make the fix directly
+5. Send a concise summary to Discord with findings using: openclaw message send --channel discord --target 1482473282925101217 --message "<summary>"
 
-**Expected flow for each user message:**
-- Gemini loads delegate skill (tool read of SKILL.md)
-- Gemini runs: delegate <channel> <target> <message> (one exec call, foreground)
-- delegate script runs agent, agent sends response to Discord, returns SENT
-- Gemini appends quota footer
+**Expected flow (passthrough router architecture):**
+- Gemini receives message → immediately delegates via exec(delegate ...) — no thinking, no classification
+- delegate script: sanitizes newlines/quotes → builds prompt → runs Claude agent → Claude sends to Discord → returns SENT
+- Gemini receives SENT → stops. No further output. No retries. No extra tool calls.
 
 **Red flags:**
-- Gemini answering directly (text response without exec)
-- Background exec (should be foreground)
-- Multiple exec/tool calls for one request (should be one)
-- Rate limit errors (429)
-- Empty responses
-- Gemini polling/retrying after exec
+- Gemini answering directly (text response without exec delegate) — CRITICAL routing failure
+- Gemini calling web_search, read, or any tool other than exec delegate — should ONLY delegate
+- Background exec ("Command still running") — should be foreground with yieldMs:120000
+- Multiple exec calls for one request — should be exactly one
+- Rate limit errors (429) — check if gateway retried (retry.attempts should be 1)
+- Exit code 127 in delegate log — newline in message broke bash (OC-016)
+- Gemini doing extra turns after exec returns SENT — should stop immediately
+- Missing delegate_recv/delegate_exit in timeline for a gateway exec event — indicates delegate script crash
+
+**Timeline log events (JSON-lines):**
+- delegate_recv: message received by delegate script
+- sanitize: message sanitized (check orig_len vs sanitized_len for newline removals)
+- lock_acquired / lock_blocked: concurrency control
+- prompt_ready: Claude prompt built (check byte size)
+- agent_start / agent_done: Claude agent execution (check duration_ms, exit_code)
+- failure_detected / failure_notified: delegation failed, user was notified
+- delegate_exit: final output returned to Gemini (check total_ms)
 
 PROMPT_HEADER
 
 cat >> "$PROMPT_FILE" << PROMPT_DATA
 ## Date: $DATE
 
-## Delegate Log
+## Delegate Log (human-readable)
 $DELEGATE_LOG
+
+## Timeline Log (JSON-lines, machine-parseable)
+$TIMELINE_LOG
 
 ## Gateway Log (exec and send events only)
 $GATEWAY_LOG
 
-## Session Summaries
+## Session Summaries (Gemini JSONL)
 $SESSION_SUMMARY
 
-## Current Skill File
+## Current AGENTS.md
+$AGENTS_CONTENT
+
+## Current Delegate SKILL.md
 $SKILL_CONTENT
 PROMPT_DATA
 
