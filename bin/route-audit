@@ -194,6 +194,9 @@ $GATEWAY_LOG
 ## Session Summaries (Gemini JSONL)
 $SESSION_SUMMARY
 
+## Workspace Integrity Snapshot
+$WORKSPACE_INTEGRITY
+
 ## Current AGENTS.md
 $AGENTS_CONTENT
 
