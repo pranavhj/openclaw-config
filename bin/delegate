@@ -1,18 +1,10 @@
 #!/bin/bash
 # Single delegation command — Gemini calls this, script handles the rest
+# Flow: Gemini exec → this script → Claude agent → Discord response
 CHANNEL="$1"
 TARGET="$2"
 shift 2
 MESSAGE="$*"
-
-# Sanitize message: replace straight apostrophe/single-quote with Unicode right single
-# quotation mark (U+2019, looks identical in Discord). This is belt-and-suspenders —
-# the primary fix is in SKILL.md (never quote message with single quotes).
-# Also replaces backticks to prevent accidental old-style command substitution leakage.
-RSQUOTE=$'\xe2\x80\x99'  # U+2019 RIGHT SINGLE QUOTATION MARK
-LDQUOTE=$'\xe2\x80\x98'  # U+2018 LEFT SINGLE QUOTATION MARK (replaces backtick)
-MESSAGE="${MESSAGE//$'\''/$RSQUOTE}"
-MESSAGE="${MESSAGE//\`/$LDQUOTE}"
 
 LOGDIR="/tmp/openclaw"
 LOGFILE="$LOGDIR/delegate-$(date +%Y-%m-%d).log"
@@ -20,34 +12,58 @@ TIMELINE_LOG="$LOGDIR/timeline-$(date +%Y-%m-%d).log"
 LOCKFILE="$LOGDIR/delegate.lock"
 mkdir -p "$LOGDIR"
 
-# Millisecond timestamp helper
+# Millisecond timestamp helper (UTC ISO-8601)
 ts_ms() { date '+%Y-%m-%dT%H:%M:%S.%3NZ' --utc; }
 TS_RECV=$(ts_ms)
 
-# Prevent duplicate concurrent runs (Gemini sometimes fires twice in background mode)
+# JSON-safe string helper (escapes quotes and backslashes for timeline log)
+json_safe() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' '; }
+
+# --- Log: delegate_recv ---
+printf '{"ts":"%s","event":"delegate_recv","channel":"%s","target":"%s","msg_len":%d,"msg_preview":"%s"}\n' \
+  "$TS_RECV" "$CHANNEL" "$TARGET" "${#MESSAGE}" "$(json_safe "${MESSAGE:0:80}")" >> "$TIMELINE_LOG"
+
+# --- Sanitization ---
+ORIG_LEN=${#MESSAGE}
+RSQUOTE=$'\xe2\x80\x99'  # U+2019 RIGHT SINGLE QUOTATION MARK
+LDQUOTE=$'\xe2\x80\x98'  # U+2018 LEFT SINGLE QUOTATION MARK (replaces backtick)
+MESSAGE="${MESSAGE//$'\''/$RSQUOTE}"
+MESSAGE="${MESSAGE//\`/$LDQUOTE}"
+MESSAGE="${MESSAGE//$'\n'/ }"  # OC-016 fix: newlines break bash exec
+SANITIZED_LEN=${#MESSAGE}
+CHARS_REPLACED=$(( ORIG_LEN - SANITIZED_LEN ))
+
+TS_SANITIZE=$(ts_ms)
+printf '{"ts":"%s","event":"sanitize","orig_len":%d,"sanitized_len":%d,"chars_replaced":%d}\n' \
+  "$TS_SANITIZE" "$ORIG_LEN" "$SANITIZED_LEN" "$CHARS_REPLACED" >> "$TIMELINE_LOG"
+
+# --- Lock: prevent duplicate concurrent runs ---
 if ! mkdir "$LOCKFILE" 2>/dev/null; then
-  echo "SENT" # pretend success so Gemini stops retrying
+  TS_BLOCKED=$(ts_ms)
+  printf '{"ts":"%s","event":"lock_blocked","msg":"duplicate run detected"}\n' "$TS_BLOCKED" >> "$TIMELINE_LOG"
+  echo "lock_blocked: duplicate run at $TS_BLOCKED" >> "$LOGFILE"
+  echo "SENT"
   exit 0
 fi
 trap "rmdir '$LOCKFILE' 2>/dev/null" EXIT
 
+TS_LOCK=$(ts_ms)
+printf '{"ts":"%s","event":"lock_acquired"}\n' "$TS_LOCK" >> "$TIMELINE_LOG"
+
+# --- Discover projects ---
 PROJECTS=$(ls /home/pranav/projects/ 2>/dev/null | tr '\n' ', ')
 
-# Log the delegation (human-readable)
+# --- Log: human-readable header ---
 {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S %Z') ==="
   echo "channel: $CHANNEL"
   echo "target: $TARGET"
-  echo "message: $MESSAGE"
+  echo "message: ${MESSAGE:0:200}"
+  echo "msg_len: $ORIG_LEN (sanitized: $SANITIZED_LEN)"
   echo "projects: ${PROJECTS:-none}"
-  echo "status: starting"
 } >> "$LOGFILE"
 
-# Timeline log (machine-parseable JSON-lines for end-to-end tracing)
-printf '{"ts":"%s","event":"delegate_recv","channel":"%s","target":"%s","msg_preview":"%s"}\n' \
-  "$TS_RECV" "$CHANNEL" "$TARGET" "${MESSAGE:0:80}" >> "$TIMELINE_LOG"
-
-# Build prompt in a temp file to safely handle special chars in $MESSAGE
+# --- Build prompt ---
 PROMPT_FILE=$(mktemp /tmp/delegate-prompt-XXXXXX.txt)
 cat > "$PROMPT_FILE" << 'HEADER'
 ## Reply
@@ -56,11 +72,16 @@ printf 'Channel: %s\nTarget: %s\n\n' "$CHANNEL" "$TARGET" >> "$PROMPT_FILE"
 printf '## Known projects in /home/pranav/projects/\n%s\n\n' "${PROJECTS:-none}" >> "$PROMPT_FILE"
 printf '## Request\n%s\n' "$MESSAGE" >> "$PROMPT_FILE"
 
-# Log agent invocation start
-TS_AGENT_START=$(ts_ms)
-printf '{"ts":"%s","event":"agent_start","channel":"%s"}\n' "$TS_AGENT_START" "$CHANNEL" >> "$TIMELINE_LOG"
+PROMPT_SIZE=$(wc -c < "$PROMPT_FILE")
+TS_PROMPT=$(ts_ms)
+printf '{"ts":"%s","event":"prompt_ready","file":"%s","bytes":%d}\n' \
+  "$TS_PROMPT" "$PROMPT_FILE" "$PROMPT_SIZE" >> "$TIMELINE_LOG"
 
-# Run agent — pass prompt file path, not inline expansion (avoids shell injection)
+# --- Run agent ---
+TS_AGENT_START=$(ts_ms)
+printf '{"ts":"%s","event":"agent_start","channel":"%s","target":"%s"}\n' \
+  "$TS_AGENT_START" "$CHANNEL" "$TARGET" >> "$TIMELINE_LOG"
+
 OUTPUT=$(cd /home/pranav/projects/openclaw && agent --continue --permission-mode bypassPermissions --print "$(cat "$PROMPT_FILE")" 2>&1)
 EXIT_CODE=$?
 rm -f "$PROMPT_FILE"
@@ -68,18 +89,47 @@ rm -f "$PROMPT_FILE"
 TS_AGENT_DONE=$(ts_ms)
 DURATION_MS=$(( $(date -d "$TS_AGENT_DONE" +%s%3N 2>/dev/null || echo 0) - $(date -d "$TS_AGENT_START" +%s%3N 2>/dev/null || echo 0) ))
 
-# Log agent return
-printf '{"ts":"%s","event":"agent_done","exit_code":%d,"output":"%s","duration_ms":%d}\n' \
-  "$TS_AGENT_DONE" "$EXIT_CODE" "${OUTPUT:0:40}" "$DURATION_MS" >> "$TIMELINE_LOG"
+# --- Log: agent_done ---
+printf '{"ts":"%s","event":"agent_done","exit_code":%d,"duration_ms":%d,"output_preview":"%s"}\n' \
+  "$TS_AGENT_DONE" "$EXIT_CODE" "$DURATION_MS" "$(json_safe "${OUTPUT:0:60}")" >> "$TIMELINE_LOG"
 
-# Log the result (human-readable)
+# --- Failure handling ---
+if [ "$EXIT_CODE" -ne 0 ] && [[ "$OUTPUT" != *"SENT"* ]]; then
+  TS_FAIL=$(ts_ms)
+  printf '{"ts":"%s","event":"failure_detected","exit_code":%d,"output_preview":"%s"}\n' \
+    "$TS_FAIL" "$EXIT_CODE" "$(json_safe "${OUTPUT:0:100}")" >> "$TIMELINE_LOG"
+
+  # Notify user on Discord so they're not left waiting
+  openclaw message send --channel "$CHANNEL" --target "$TARGET" \
+    --message "Delegation failed (exit $EXIT_CODE). Please try again.
+-# sent by delegate" 2>/dev/null
+  NOTIFY_EXIT=$?
+
+  TS_NOTIFY=$(ts_ms)
+  printf '{"ts":"%s","event":"failure_notified","notify_exit":%d}\n' \
+    "$TS_NOTIFY" "$NOTIFY_EXIT" >> "$TIMELINE_LOG"
+
+  echo "failure_notified: exit=$NOTIFY_EXIT at $TS_NOTIFY" >> "$LOGFILE"
+  OUTPUT="SENT"  # Tell Gemini to stop
+fi
+
+# --- Log: delegate_exit ---
+TS_EXIT=$(ts_ms)
+TOTAL_MS=$(( $(date -d "$TS_EXIT" +%s%3N 2>/dev/null || echo 0) - $(date -d "$TS_RECV" +%s%3N 2>/dev/null || echo 0) ))
+
+printf '{"ts":"%s","event":"delegate_exit","total_ms":%d,"final_output":"%s"}\n' \
+  "$TS_EXIT" "$TOTAL_MS" "$(json_safe "${OUTPUT:0:40}")" >> "$TIMELINE_LOG"
+
+# Human-readable summary
 {
   echo "ts_recv: $TS_RECV"
   echo "ts_agent_start: $TS_AGENT_START"
   echo "ts_agent_done: $TS_AGENT_DONE"
-  echo "duration_ms: $DURATION_MS"
+  echo "ts_exit: $TS_EXIT"
+  echo "duration_agent_ms: $DURATION_MS"
+  echo "duration_total_ms: $TOTAL_MS"
   echo "exit_code: $EXIT_CODE"
-  echo "output: $OUTPUT"
+  echo "output: ${OUTPUT:0:200}"
   echo "status: done"
   echo ""
 } >> "$LOGFILE"
