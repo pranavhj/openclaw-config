@@ -112,6 +112,28 @@ print(chr(10).join(results) if results else '(no sessions for this date)')
 AGENTS_CONTENT=$(cat "$HOME/.openclaw/workspace/AGENTS.md" 2>/dev/null || echo "(missing)")
 SKILL_CONTENT=$(cat "$HOME/.openclaw/workspace/skills/delegate/SKILL.md" 2>/dev/null || echo "(missing)")
 
+# Workspace integrity snapshot
+ALLOWED_SKILLS="delegate discord-send quota gemini-requests routing-audit"
+ACTUAL_SKILLS=$(ls "$HOME/.openclaw/workspace/skills/" 2>/dev/null | sort | tr '\n' ' ')
+ROGUE_SKILLS=""
+for S in $(ls "$HOME/.openclaw/workspace/skills/" 2>/dev/null); do
+  echo "$ALLOWED_SKILLS" | grep -qw "$S" || ROGUE_SKILLS="$ROGUE_SKILLS $S"
+done
+WORKSPACE_INTEGRITY="Skills present: $ACTUAL_SKILLS"
+if [[ -n "$ROGUE_SKILLS" ]]; then
+  WORKSPACE_INTEGRITY="$WORKSPACE_INTEGRITY | ROGUE SKILLS:$ROGUE_SKILLS"
+fi
+ALLOWED_BINS="delegate route-audit run-tests openclaw-timeline route-log send-gemini-stats agent oc httpx gq claude"
+ROGUE_BINS=""
+for B in $(ls /home/pranav/.local/bin/ 2>/dev/null); do
+  echo "$ALLOWED_BINS" | grep -qw "$B" || ROGUE_BINS="$ROGUE_BINS $B"
+done
+if [[ -n "$ROGUE_BINS" ]]; then
+  WORKSPACE_INTEGRITY="$WORKSPACE_INTEGRITY | ROGUE BINARIES:$ROGUE_BINS"
+fi
+AGENTS_LINES=$(wc -l < "$HOME/.openclaw/workspace/AGENTS.md" 2>/dev/null || echo 0)
+WORKSPACE_INTEGRITY="$WORKSPACE_INTEGRITY | AGENTS.md lines: $AGENTS_LINES"
+
 # Build prompt file
 cat > "$PROMPT_FILE" << 'PROMPT_HEADER'
 ## Task: Daily Routing Audit
