@@ -79,4 +79,4 @@ Examples:
 ## Issues
 
 See [ISSUES.md](ISSUES.md) for the full tracker.
-Open bugs: OC-001 (retry count wontfix), OC-002 (silent drop on RPM exhaustion). 16 issues tracked.
+Open bugs: OC-001 (retry count wontfix), OC-002 (silent drop on RPM exhaustion). 18 issues tracked.

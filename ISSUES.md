@@ -22,3 +22,5 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-014](issues/OC-014-gemini-delegates-own-text-not-user-message.md) | bug | fixed | Gemini composed its own text and delegated that instead of the original user message verbatim | — |
 | [OC-015](issues/OC-015-delegate-exec-failed-on-apostrophes.md) | bug | fixed | Delegate exec fails when message contains apostrophe — Gemini wraps in single quotes, shell parse error | `fix(OC-015)` |
 | [OC-016](issues/OC-016-newlines-break-delegate-exec.md) | bug | fixed | Newlines in user messages break delegate exec (bash exit 127) — message silently dropped | `fix(OC-016)` |
+| [OC-017](issues/OC-017-gemini-overwrote-agents-md.md) | bug | fixed | Gemini used write tool to overwrite AGENTS.md with anti-delegation instructions | `fix(OC-017)` |
+| [OC-018](issues/OC-018-claude-created-rogue-gemini-skill.md) | bug | fixed | Claude created rogue Alexa skill in Gemini workspace + alexa-send binary in ~/.local/bin | `fix(OC-018)` |

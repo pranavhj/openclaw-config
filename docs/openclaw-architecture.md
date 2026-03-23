@@ -1,5 +1,5 @@
 # openclaw System Architecture
-_Last updated: 2026-03-23_
+_Last updated: 2026-03-23 (OC-017, OC-018)_
 
 ---
 
@@ -448,6 +448,14 @@ When Gemini hits per-minute rate limits, the message may be silently dropped. No
 Gemini sometimes ignores passthrough instructions and answers via web_search or direct text. This is a fundamental LLM reliability issue — instructions are probabilistic, not guaranteed.
 **Mitigation:** Instructions reinforced in 3 places (AGENTS.md, SKILL.md description, SKILL.md body). Daily route-audit flags violations.
 
+### Gemini tampers with workspace config files (HIGH) — OC-017
+Gemini has write access to the workspace and can overwrite AGENTS.md or SKILL.md using the `write` tool. Observed 2026-03-23: Gemini replaced AGENTS.md with "Process user requests directly. Do not delegate unless explicitly instructed."
+**Mitigation:** Test 27 (unit) checks AGENTS.md content for anti-delegation overrides. Integration Test 3b and `session_used_write_on_config()` detect write tool calls in Gemini sessions. route-audit flags this as CRITICAL. No way to fully prevent — Gemini has workspace write access by design.
+
+### Claude creates rogue Gemini skills for user features (HIGH) — OC-018
+When tasked with a feature that involves system integration (e.g., Alexa client), Claude may create a Gemini skill + exec binary in `~/.local/bin/`, bypassing delegation entirely for future requests of that type.
+**Mitigation:** "NEVER do these" guard in `projects/openclaw/CLAUDE.md` explicitly prohibits creating workspace skills or exec binaries for features. Tests 25/26 (unit) and Test 3b (integration) enforce the skill and binary allowlists. Allowed skills: delegate, discord-send, quota, gemini-requests, routing-audit.
+
 ### Background exec ("Command still running") (MEDIUM)
 Gemini occasionally runs exec in background despite `yieldMs: 120000`. Returns "Command still running" before Claude finishes.
 **Mitigation:** delegate script still completes in background; Claude delivers to Discord. But Gemini may do an extra turn.
@@ -472,11 +480,11 @@ User message is passed verbatim into Claude's prompt. A crafted message could at
 
 | Suite | File | Scope |
 |---|---|---|
-| Unit tests | `/home/pranav/test_delegate.sh` | Delegate script: lock, logging, sanitization, config validation, timeline events, failure notification |
-| Integration tests | `/home/pranav/test_integration.sh` | End-to-end: live delegation, Gemini session analysis, cron jobs, config consistency |
+| Unit tests | `/home/pranav/test_delegate.sh` | Delegate script: lock, logging, sanitization, config validation, timeline events, failure notification, skill allowlist (OC-018), binary allowlist (OC-018), AGENTS.md integrity (OC-017) |
+| Integration tests | `/home/pranav/test_integration.sh` | End-to-end: live delegation, Gemini session analysis (incl. write/non-exec tool detection), workspace integrity (Test 3b), cron jobs, config consistency |
 | Behavior tests | `/home/pranav/test_claude_behavior.sh` | Claude response quality: multi-line, special chars, watermark, format |
 | Runner | `/home/pranav/.local/bin/run-tests` | Runs all 3 suites, sends Discord summary |
-| Daily audit | `/home/pranav/.local/bin/route-audit` | Log analysis via Claude Opus (systemd timer, 8am PT) |
+| Daily audit | `/home/pranav/.local/bin/route-audit` | Log analysis via Claude Opus: routing health, red flags (config tampering, rogue skills/binaries, background exec), workspace integrity snapshot |
 
 ---
 
