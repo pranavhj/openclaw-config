@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: "Delegate ANY non-trivial request. Run exec with yieldMs:120000 (wait up to 2 minutes for Claude to respond): delegate <channel> <target> <full message verbatim>. Example: exec({command:\"delegate discord 1482473282925101217 What is the speed of light?\", yieldMs:120000}). NEVER wrap the message in single quotes — pass words unquoted. When exec returns SENT, stop — do not read any file first, just exec delegate directly. Use for: questions, explanations, coding, debugging, analysis, writing, math — anything non-trivial."
+description: "Delegate ALL requests to Claude. FIRST replace newlines in the message with spaces. Then exec({command:\"delegate discord 1482473282925101217 <message as single line>\", yieldMs:120000}). NEVER wrap message in quotes. When exec returns, STOP — no further output or tool calls."
 ---
 
 # Delegate Skill
@@ -8,23 +8,34 @@ description: "Delegate ANY non-trivial request. Run exec with yieldMs:120000 (wa
 Run this exec command with `yieldMs:120000`:
 
 ```
-delegate <channel> <target> <user's full original message, verbatim>
+delegate <channel> <target> <user's message as a SINGLE LINE>
 ```
 
-Parameters to pass to exec tool:
-- `command`: `delegate <channel> <target> <message>`
-- `yieldMs`: `120000` (wait up to 2 minutes — Claude needs time to respond)
+## CRITICAL: Newline handling (OC-016)
 
-Example exec call:
+Before building the exec command, **replace ALL newline characters in the user's message with a single space**. The command string MUST be a single line. Multi-line messages passed to exec will break bash.
+
+## Parameters
+
+- `command`: `delegate <channel> <target> <message with newlines replaced by spaces>`
+- `yieldMs`: `120000`
+
+## Example
+
+User sends:
+```
+Hello
+Can you help me?
+```
+
+Exec call (newlines replaced with spaces):
 ```json
-{"command": "delegate discord 1482473282925101217 Write a fizzbuzz program in C++", "yieldMs": 120000}
+{"command": "delegate discord 1482473282925101217 Hello Can you help me?", "yieldMs": 120000}
 ```
 
-**IMPORTANT: Pass yieldMs:120000 — do NOT use background:true or default yieldMs (10s is too short). Wait for SENT.**
+## Rules
 
-**QUOTING: NEVER wrap the message argument in single quotes. Pass the message as unquoted words. Apostrophes (e.g. "I'm", "don't") must NOT be surrounded by single quotes in the shell command — just pass them literally.**
-
-Correct: `delegate discord 123 I'm looking for software`
-Wrong:   `delegate discord 123 'I'\''m looking for software'`
-
-When exec returns any result, stop immediately. No quota footer. No further tool calls. Claude already delivered the response.
+- **NEWLINES**: Replace all `\n` with space before exec. Single line only.
+- **QUOTING**: NEVER wrap message in single quotes. Pass words unquoted.
+- **yieldMs**: Always 120000. Never use background:true.
+- **After exec returns**: STOP. No further output. No further tool calls. Claude already delivered.
