@@ -3,7 +3,7 @@
 # Safe to run any time — will never commit real credentials.
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
-cp /home/pranav/.openclaw/BOOT.md                                        "$REPO/config/BOOT.md"
+# BOOT.md deleted (OC-016) — dead code, never loaded by openclaw gateway
 cp /home/pranav/.openclaw/workspace/AGENTS.md                            "$REPO/workspace/AGENTS.md"
 cp /home/pranav/.openclaw/workspace/skills/delegate/SKILL.md             "$REPO/workspace/skills/delegate/SKILL.md"
 cp /home/pranav/.openclaw/workspace/skills/discord-send/SKILL.md         "$REPO/workspace/skills/discord-send/SKILL.md"

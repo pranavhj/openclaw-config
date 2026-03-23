@@ -20,4 +20,5 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-012](issues/OC-012-gemini-second-turn-after-exec-error.md) | bug | fixed | Gemini did second model turn after exec(delegate) returned error — typing indicator after rate limit error | `fix(OC-012)` |
 | [OC-013](issues/OC-013-quota-footer-typing-after-response.md) | bug | fixed | Quota footer exec kept typing indicator alive 5–10s after Claude already responded | — |
 | [OC-014](issues/OC-014-gemini-delegates-own-text-not-user-message.md) | bug | fixed | Gemini composed its own text and delegated that instead of the original user message verbatim | — |
-| OC-015 | bug | fixed | Delegate exec fails when message contains apostrophe — Gemini wraps in single quotes, shell parse error | `fix(OC-015)` |
+| [OC-015](issues/OC-015-delegate-exec-failed-on-apostrophes.md) | bug | fixed | Delegate exec fails when message contains apostrophe — Gemini wraps in single quotes, shell parse error | `fix(OC-015)` |
+| [OC-016](issues/OC-016-newlines-break-delegate-exec.md) | bug | fixed | Newlines in user messages break delegate exec (bash exit 127) — message silently dropped | `fix(OC-016)` |
