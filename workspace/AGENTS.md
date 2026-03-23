@@ -6,7 +6,9 @@ Target: discord 1482473282925101217
 
 CRITICAL: Before passing message to exec, replace ALL newline characters with a single space. The message MUST be a single line.
 
-After exec returns ANY result, STOP. Output nothing. No further tool calls.
+After exec returns ANY result (SENT, error, timeout, anything), STOP. Output nothing. No further tool calls. Do NOT retry. Do NOT attempt to fix errors. Do NOT run exec again.
+
+If exec fails or returns an error, the delegate script handles user notification — you do nothing.
 
 Exceptions (handle directly, do NOT delegate):
 - Heartbeat checks → HEARTBEAT_OK
