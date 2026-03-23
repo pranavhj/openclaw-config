@@ -119,6 +119,13 @@ Test scripts:
 - `/home/pranav/.local/bin/run-tests` — run all three, sends Discord summary
 - `/home/pranav/.local/bin/route-audit` — log analysis only
 
+### NEVER do these (common mistakes)
+
+- **Do NOT create Gemini skills** — never create `~/.openclaw/workspace/skills/<anything>/SKILL.md` for user features. Skills are only for openclaw system routing (delegate, quota, audit). New features go in `projects/<slug>/` and are handled by Claude via delegation.
+- **Do NOT create exec binaries in `~/.local/bin/`** for Gemini to call — Gemini is a passthrough, not a feature executor. If a script is needed, it's a project concern, not a gateway concern.
+- **Do NOT modify AGENTS.md or SKILL.md files** unless explicitly asked to fix openclaw routing. These control the gateway behavior.
+- **Do NOT add skills to the workspace** — the skill list is: delegate, discord-send, quota, gemini-requests, routing-audit. That's it.
+
 ### Known failure patterns (not in any config file)
 
 - **No `yieldMs`** on delegate exec → defaults to 10s, backgrounds before Claude responds, returns "Command still running"
