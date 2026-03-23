@@ -108,7 +108,9 @@ Commit format: `<type>(<scope>): <description>`
 - type: `fix` | `feat` | `config` | `sync` | `docs` | `misc`
 - scope: `OC-NNN` (issue ID) or `sync` | `misc` | `docs`
 
-The path watcher auto-commits simple drift, but your intentional changes need a proper commit.
+**What the path watcher auto-commits:** Changes to live files only — AGENTS.md, SKILL.md files, delegate, route-audit, openclaw.json, CLAUDE.md files. These trigger `sync-from-live.sh` automatically.
+
+**What requires a manual commit (path watcher never sees these):** `ISSUES.md`, `README.md`, `docs/openclaw-architecture.md`, `issues/OC-*.md` — these are repo-only files with no live counterpart. Always commit these manually after any fix or architecture change.
 
 Check open issues before diagnosing: `cat /home/pranav/openclaw-config/ISSUES.md`
 
