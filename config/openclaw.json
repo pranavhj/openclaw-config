@@ -9,6 +9,7 @@
   },
   "agents": {
     "defaults": {
+      "thinkingDefault": "off",
       "model": {
         "primary": "google/gemini-2.5-flash",
         "fallbacks": []
