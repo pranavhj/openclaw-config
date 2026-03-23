@@ -129,10 +129,17 @@ You are auditing the openclaw routing system. Analyze the logs below and:
 - delegate script: sanitizes newlines/quotes → builds prompt → runs Claude agent → Claude sends to Discord → returns SENT
 - Gemini receives SENT → stops. No further output. No retries. No extra tool calls.
 
-**Red flags:**
+**Red flags (CRITICAL — immediate action required):**
+- Gemini used `write` tool on ANY file in ~/.openclaw/workspace/ — config tampering (this happened 2026-03-23: Gemini overwrote AGENTS.md)
+- Gemini used `read` tool on AGENTS.md or SKILL.md during routing — should never read config files, just delegate
+- Rogue skill in workspace/skills/ beyond: delegate, discord-send, quota, gemini-requests, routing-audit — Claude or Gemini created an unauthorized skill (this happened 2026-03-23: Claude created alexa skill)
+- Any binary in ~/.local/bin/ not in expected set — rogue exec target created for Gemini to call
+
+**Red flags (routing failures):**
 - Gemini answering directly (text response without exec delegate) — CRITICAL routing failure
-- Gemini calling web_search, read, or any tool other than exec delegate — should ONLY delegate
+- Gemini calling web_search or any tool other than exec — should ONLY exec delegate
 - Background exec ("Command still running") — should be foreground with yieldMs:120000
+- Missing yieldMs in exec call — will background
 - Multiple exec calls for one request — should be exactly one
 - Rate limit errors (429) — check if gateway retried (retry.attempts should be 1)
 - Exit code 127 in delegate log — newline in message broke bash (OC-016)
