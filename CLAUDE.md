@@ -49,7 +49,7 @@ What was changed.
 | What | Path |
 |------|------|
 | Gateway config | `/home/pranav/.openclaw/openclaw.json` |
-| Gemini routing | `/home/pranav/.openclaw/BOOT.md` + `workspace/AGENTS.md` |
+| Gemini routing | `/home/pranav/.openclaw/workspace/AGENTS.md` |
 | Skills | `/home/pranav/.openclaw/workspace/skills/<name>/SKILL.md` |
 | Delegate script | `/home/pranav/.local/bin/delegate` |
 

@@ -7,7 +7,6 @@ Source control for the openclaw gateway: configs, skills, agent prompts, and iss
 ```
 config/
   openclaw.json          # Gateway config (secrets redacted — use .env for real values)
-  BOOT.md                # Gemini routing rules (loaded at agent startup)
 workspace/
   AGENTS.md              # Gemini workspace routing rules
   skills/
@@ -35,7 +34,6 @@ ISSUES.md                # Issue index
 | Repo path | Live path |
 |-----------|-----------|
 | `config/openclaw.json` | `~/.openclaw/openclaw.json` |
-| `config/BOOT.md` | `~/.openclaw/BOOT.md` |
 | `workspace/AGENTS.md` | `~/.openclaw/workspace/AGENTS.md` |
 | `workspace/skills/*/SKILL.md` | `~/.openclaw/workspace/skills/*/SKILL.md` |
 | `agents/openclaw-CLAUDE.md` | `~/projects/openclaw/CLAUDE.md` |
@@ -81,4 +79,4 @@ Examples:
 ## Issues
 
 See [ISSUES.md](ISSUES.md) for the full tracker.
-Open bugs: OC-001 (retry count), OC-002 (silent drop on RPM exhaustion)
+Open bugs: OC-001 (retry count wontfix), OC-002 (silent drop on RPM exhaustion). 16 issues tracked.

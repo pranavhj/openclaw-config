@@ -3,7 +3,6 @@
 # WARNING: Does NOT restart the gateway — run: systemctl --user restart openclaw-gateway
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
-cp "$REPO/config/BOOT.md"                                        /home/pranav/.openclaw/BOOT.md
 cp "$REPO/workspace/AGENTS.md"                                   /home/pranav/.openclaw/workspace/AGENTS.md
 cp "$REPO/workspace/skills/delegate/SKILL.md"                    /home/pranav/.openclaw/workspace/skills/delegate/SKILL.md
 cp "$REPO/workspace/skills/discord-send/SKILL.md"                /home/pranav/.openclaw/workspace/skills/discord-send/SKILL.md

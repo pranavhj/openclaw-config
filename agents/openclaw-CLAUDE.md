@@ -41,7 +41,7 @@ If no `## Reply` section is provided, fall back to Discord DM: channel=discord t
 - Gemini API usage: `python3 /home/pranav/gemini_counter.py`
 - Discord DM channel ID: `1482473282925101217` (user ID: `1277144623231537274`)
 - Gateway config: `/home/pranav/.openclaw/openclaw.json`
-- Gemini routing rules: `/home/pranav/.openclaw/workspace/AGENTS.md` and `/home/pranav/.openclaw/BOOT.md`
+- Gemini routing rules: `/home/pranav/.openclaw/workspace/AGENTS.md`
 - Delegate script: `/home/pranav/.local/bin/delegate`
 - Session logs: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
 - Delegate logs: `/tmp/openclaw/delegate-YYYY-MM-DD.log`
