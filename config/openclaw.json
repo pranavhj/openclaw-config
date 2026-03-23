@@ -70,7 +70,7 @@
       "groupPolicy": "allowlist",
       "streaming": "off",
       "retry": {
-        "attempts": 1
+        "attempts": 0
       },
       "dmPolicy": "pairing",
       "allowFrom": [
