@@ -38,4 +38,4 @@ Exec call (newlines replaced with spaces):
 - **NEWLINES**: Replace all `\n` with space before exec. Single line only.
 - **QUOTING**: NEVER wrap message in single quotes. Pass words unquoted.
 - **yieldMs**: Always 120000. Never use background:true.
-- **After exec returns**: STOP. No further output. No further tool calls. Claude already delivered.
+- **After exec returns**: STOP. No further output. No further tool calls. No retries. Even on error — delegate handles failure notification itself.
