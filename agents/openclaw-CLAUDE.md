@@ -86,7 +86,7 @@ You are the expert on the openclaw system. When diagnosing issues, read the live
 | What | Path |
 |------|------|
 | Gateway config | `/home/pranav/.openclaw/openclaw.json` |
-| Gemini routing rules | `/home/pranav/.openclaw/BOOT.md` and `.openclaw/workspace/AGENTS.md` |
+| Gemini routing rules | `/home/pranav/.openclaw/workspace/AGENTS.md` |
 | Skills | `/home/pranav/.openclaw/workspace/skills/<name>/SKILL.md` |
 | Delegate script | `/home/pranav/.local/bin/delegate` |
 | Session logs | `/tmp/openclaw/openclaw-YYYY-MM-DD.log` |
