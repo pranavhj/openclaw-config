@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: "Delegate ALL requests to Claude. FIRST replace newlines in the message with spaces. Then exec({command:\"delegate discord 1482473282925101217 <message as single line>\", yieldMs:120000}). NEVER wrap message in quotes. When exec returns, STOP — no further output or tool calls."
+description: "Delegate ALL requests to Claude. FIRST replace newlines with spaces. Then exec({command:\"delegate discord 1482473282925101217 <message>\", yieldMs:120000}). MANDATORY: always include yieldMs:120000 — without it the command backgrounds and fails. NEVER wrap message in quotes. When exec returns, STOP."
 ---
 
 # Delegate Skill
