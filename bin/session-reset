@@ -1,0 +1,26 @@
+#!/bin/bash
+# Reset the Gemini main agent session — clears context so next message starts fresh.
+SESSIONS_FILE="/home/pranav/.openclaw/agents/main/sessions/sessions.json"
+SESSION_KEY="agent:main:main"
+
+CURRENT_ID=$(python3 -c "
+import json
+try:
+    d = json.load(open('$SESSIONS_FILE'))
+    print(d.get('$SESSION_KEY', {}).get('sessionId', ''))
+except: pass
+" 2>/dev/null)
+
+if [[ -n "$CURRENT_ID" ]]; then
+  SESSION_FILE="/home/pranav/.openclaw/agents/main/sessions/${CURRENT_ID}.jsonl"
+  rm -f "$SESSION_FILE"
+  python3 -c "
+import json
+d = json.load(open('$SESSIONS_FILE'))
+d.pop('$SESSION_KEY', None)
+open('$SESSIONS_FILE', 'w').write(json.dumps(d, indent=2))
+" 2>/dev/null
+  echo "Session reset (cleared $CURRENT_ID)"
+else
+  echo "No active session to reset"
+fi
