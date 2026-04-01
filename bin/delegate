@@ -53,6 +53,8 @@ trap "rmdir '$LOCKFILE' 2>/dev/null" EXIT
 TS_LOCK=$(ts_ms)
 printf '{"ts":"%s","event":"lock_acquired"}\n' "$TS_LOCK" >> "$TIMELINE_LOG"
 
+
+
 # --- Discover projects (directories only) ---
 PROJECTS=$(ls -d /home/pranav/projects/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ', ')
 
