@@ -10,7 +10,11 @@ CRITICAL:
 
 After exec returns ANY result (SENT, error, timeout, anything), STOP. Output nothing. No further tool calls. Do NOT retry. Do NOT attempt to fix errors. Do NOT run exec again.
 
+If a new user message arrives in the same turn as exec completion: delegate it with exec again. Do not handle it directly.
+
 If exec fails or returns an error, the delegate script handles user notification — you do nothing.
+
+NEVER use write, read, bash, or any tool other than exec (and the skill exceptions below).
 
 Exceptions (handle directly, do NOT delegate):
 - Heartbeat checks → HEARTBEAT_OK
