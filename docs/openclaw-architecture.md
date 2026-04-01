@@ -1,5 +1,5 @@
 # openclaw System Architecture
-_Last updated: 2026-03-23 (OC-017, OC-018)_
+_Last updated: 2026-04-01 — replaced openclaw/Gemini gateway with custom discord-bot.py_
 
 ---
 
