@@ -92,16 +92,39 @@ done
   echo "projects: ${PROJECTS:-none}"
 } >> "$LOGFILE"
 
-# --- Recent message history (last 3 prior messages, for Claude context) ---
-HISTORY=$(grep '"event":"delegate_recv"' "$TIMELINE_LOG" 2>/dev/null | tail -4 | head -3 | python3 -c "
+# Log matched project to timeline so history can be annotated
+MATCHED_PROJECT=$(basename "$WORK_DIR")
+printf '{"ts":"%s","event":"project_match","project":"%s","work_dir":"%s"}\n' \
+  "$(ts_ms)" "$MATCHED_PROJECT" "$WORK_DIR" >> "$TIMELINE_LOG"
+
+# --- Recent message history (last 3 prior messages, annotated with project) ---
+CURRENT_PROJECT="$MATCHED_PROJECT"
+HISTORY=$(cat $HISTORY_LOGS 2>/dev/null | python3 -c "
 import sys, json
-msgs = []
-for line in sys.stdin:
+lines = sys.stdin.readlines()
+# pair each delegate_recv with the next project_match event
+entries = []
+i = 0
+while i < len(lines):
     try:
-        e = json.loads(line.strip())
-        msgs.append(e.get('msg_preview','')[:120])
+        e = json.loads(lines[i].strip())
+        if e.get('event') == 'delegate_recv':
+            msg = e.get('msg_preview','')[:120]
+            proj = 'openclaw'
+            for j in range(i+1, min(i+5, len(lines))):
+                try:
+                    n = json.loads(lines[j].strip())
+                    if n.get('event') == 'project_match':
+                        proj = n.get('project','openclaw')
+                        break
+                except: pass
+            entries.append((proj, msg))
     except: pass
-print('\n'.join(f'- {m}' for m in msgs))
+    i += 1
+# last 4 entries, skip most recent (current message)
+recent = entries[-4:-1] if len(entries) >= 2 else entries[:-1]
+for proj, msg in recent:
+    print(f'- [{proj}] {msg}')
 " 2>/dev/null)
 
 # --- Build prompt ---
