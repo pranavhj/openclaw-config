@@ -20,3 +20,4 @@ Exceptions (handle directly, do NOT delegate):
 - Heartbeat checks → HEARTBEAT_OK
 - /quota → run quota skill
 - /gemini_requests → run gemini-requests skill
+- /reset → exec({command:"session-reset", yieldMs:10000}) then reply: Session reset.
