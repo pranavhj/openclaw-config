@@ -106,7 +106,7 @@ TS_AGENT_START=$(ts_ms)
 printf '{"ts":"%s","event":"agent_start","channel":"%s","target":"%s"}\n' \
   "$TS_AGENT_START" "$CHANNEL" "$TARGET" >> "$TIMELINE_LOG"
 
-OUTPUT=$(cd /home/pranav/projects/openclaw && agent --continue --permission-mode bypassPermissions --print "$(cat "$PROMPT_FILE")" 2>&1)
+OUTPUT=$(cd "$WORK_DIR" && agent --continue --permission-mode bypassPermissions --print "$(cat "$PROMPT_FILE")" 2>&1)
 EXIT_CODE=$?
 rm -f "$PROMPT_FILE"
 
