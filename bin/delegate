@@ -53,12 +53,16 @@ trap "rmdir '$LOCKFILE' 2>/dev/null" EXIT
 TS_LOCK=$(ts_ms)
 printf '{"ts":"%s","event":"lock_acquired"}\n' "$TS_LOCK" >> "$TIMELINE_LOG"
 
-# --- Discover projects ---
-PROJECTS=$(ls /home/pranav/projects/ 2>/dev/null | tr '\n' ', ')
+# --- Discover projects (directories only) ---
+PROJECTS=$(ls -d /home/pranav/projects/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ', ')
 
 # --- Match project from message + recent history (for cwd) ---
-# Check current message first, then fall back to recent history
-RECENT_MSGS=$(grep '"event":"delegate_recv"' "$TIMELINE_LOG" 2>/dev/null | tail -4 | head -3 | python3 -c "
+YESTERDAY_LOG="$LOGDIR/timeline-$(date -d yesterday '+%Y-%m-%d' 2>/dev/null || date -v-1d '+%Y-%m-%d' 2>/dev/null).log"
+TODAY_COUNT=$(grep -c '"event":"delegate_recv"' "$TIMELINE_LOG" 2>/dev/null || echo 0)
+HISTORY_LOGS="$TIMELINE_LOG"
+[[ $TODAY_COUNT -lt 3 && -f "$YESTERDAY_LOG" ]] && HISTORY_LOGS="$YESTERDAY_LOG $TIMELINE_LOG"
+
+RECENT_MSGS=$(cat $HISTORY_LOGS 2>/dev/null | grep '"event":"delegate_recv"' | tail -4 | head -3 | python3 -c "
 import sys, json
 msgs = []
 for line in sys.stdin:
@@ -69,7 +73,7 @@ print(' '.join(msgs))
 MATCH_TEXT="$MESSAGE $RECENT_MSGS"
 
 WORK_DIR="/home/pranav/projects/openclaw"
-for proj in $(ls /home/pranav/projects/ 2>/dev/null); do
+for proj in $(ls -d /home/pranav/projects/*/ 2>/dev/null | xargs -n1 basename); do
   if echo "$MATCH_TEXT" | grep -qi "$proj"; then
     WORK_DIR="/home/pranav/projects/$proj"
     break
