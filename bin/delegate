@@ -135,7 +135,7 @@ HEADER
 printf 'Channel: %s\nTarget: %s\n\n' "$CHANNEL" "$TARGET" >> "$PROMPT_FILE"
 printf '## Known projects in /home/pranav/projects/\n%s\n\n' "${PROJECTS:-none}" >> "$PROMPT_FILE"
 if [[ -n "$HISTORY" ]]; then
-  printf '## Recent messages (context only — do not reply to these)\n%s\n\n' "$HISTORY" >> "$PROMPT_FILE"
+  printf '## Recent messages (context only — do not reply to these)\nEach entry is tagged [project]. Only use entries matching [%s] as context; ignore others.\n%s\n\n' "$CURRENT_PROJECT" "$HISTORY" >> "$PROMPT_FILE"
 fi
 printf '## Request\n%s\n' "$MESSAGE" >> "$PROMPT_FILE"
 
