@@ -42,6 +42,9 @@ if ! mkdir "$LOCKFILE" 2>/dev/null; then
   TS_BLOCKED=$(ts_ms)
   printf '{"ts":"%s","event":"lock_blocked","msg":"duplicate run detected"}\n' "$TS_BLOCKED" >> "$TIMELINE_LOG"
   echo "lock_blocked: duplicate run at $TS_BLOCKED" >> "$LOGFILE"
+  openclaw message send --channel "$CHANNEL" --target "$TARGET" \
+    --message "Still working on a previous task — please resend in a moment.
+-# sent by delegate" 2>/dev/null
   echo "SENT"
   exit 0
 fi
