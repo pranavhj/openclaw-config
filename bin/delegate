@@ -53,10 +53,21 @@ printf '{"ts":"%s","event":"lock_acquired"}\n' "$TS_LOCK" >> "$TIMELINE_LOG"
 # --- Discover projects ---
 PROJECTS=$(ls /home/pranav/projects/ 2>/dev/null | tr '\n' ', ')
 
-# --- Match project from message (for cwd) ---
+# --- Match project from message + recent history (for cwd) ---
+# Check current message first, then fall back to recent history
+RECENT_MSGS=$(grep '"event":"delegate_recv"' "$TIMELINE_LOG" 2>/dev/null | tail -4 | head -3 | python3 -c "
+import sys, json
+msgs = []
+for line in sys.stdin:
+    try: msgs.append(json.loads(line.strip()).get('msg_preview',''))
+    except: pass
+print(' '.join(msgs))
+" 2>/dev/null)
+MATCH_TEXT="$MESSAGE $RECENT_MSGS"
+
 WORK_DIR="/home/pranav/projects/openclaw"
 for proj in $(ls /home/pranav/projects/ 2>/dev/null); do
-  if echo "$MESSAGE" | grep -qi "$proj"; then
+  if echo "$MATCH_TEXT" | grep -qi "$proj"; then
     WORK_DIR="/home/pranav/projects/$proj"
     break
   fi
