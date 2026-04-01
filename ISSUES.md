@@ -24,3 +24,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-016](issues/OC-016-newlines-break-delegate-exec.md) | bug | fixed | Newlines in user messages break delegate exec (bash exit 127) — message silently dropped | `fix(OC-016)` |
 | [OC-017](issues/OC-017-gemini-overwrote-agents-md.md) | bug | fixed | Gemini used write tool to overwrite AGENTS.md with anti-delegation instructions | `fix(OC-017)` |
 | [OC-018](issues/OC-018-claude-created-rogue-gemini-skill.md) | bug | fixed | Claude created rogue Alexa skill in Gemini workspace + alexa-send binary in ~/.local/bin | `fix(OC-018)` |
+| [OC-019](issues/OC-019-gemini-handled-requests-directly-bypassing-delegation.md) | bug | fixed | Gemini used write tool and replied directly when exec-completed + new user message arrived in same turn | `fix(OC-019)` |
