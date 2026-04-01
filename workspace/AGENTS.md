@@ -14,7 +14,7 @@ If a new user message arrives in the same turn as exec completion: delegate it w
 
 If exec fails or returns an error, the delegate script handles user notification — you do nothing.
 
-NEVER use write, read, bash, or any tool other than exec (and the skill exceptions below).
+NEVER use write, read, bash, web_search, or any tool other than exec (and the skill exceptions below).
 
 Exceptions (handle directly, do NOT delegate):
 - Heartbeat checks → HEARTBEAT_OK
