@@ -201,5 +201,8 @@ printf '{"ts":"%s","event":"delegate_exit","total_ms":%d,"final_output":"%s"}\n'
   echo ""
 } >> "$LOGFILE"
 
+# Reset Gemini session after each delegation — keeps context tiny, prevents OC-019 class bugs
+/home/pranav/.local/bin/session-reset >> "$LOGFILE" 2>/dev/null
+
 # Pass through output so openclaw sees SENT
 echo "$OUTPUT"
