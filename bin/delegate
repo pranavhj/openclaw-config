@@ -53,6 +53,15 @@ printf '{"ts":"%s","event":"lock_acquired"}\n' "$TS_LOCK" >> "$TIMELINE_LOG"
 # --- Discover projects ---
 PROJECTS=$(ls /home/pranav/projects/ 2>/dev/null | tr '\n' ', ')
 
+# --- Match project from message (for cwd) ---
+WORK_DIR="/home/pranav/projects/openclaw"
+for proj in $(ls /home/pranav/projects/ 2>/dev/null); do
+  if echo "$MESSAGE" | grep -qi "$proj"; then
+    WORK_DIR="/home/pranav/projects/$proj"
+    break
+  fi
+done
+
 # --- Log: human-readable header ---
 {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S %Z') ==="
