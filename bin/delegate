@@ -167,7 +167,7 @@ if [ "$EXIT_CODE" -ne 0 ] && [[ "$OUTPUT" != *"SENT"* ]]; then
     "$TS_FAIL" "$EXIT_CODE" "$(json_safe "${OUTPUT:0:100}")" >> "$TIMELINE_LOG"
 
   # Notify user on Discord so they're not left waiting
-  openclaw message send --channel "$CHANNEL" --target "$TARGET" \
+  discord-send --channel "$CHANNEL" --target "$TARGET" \
     --message "Delegation failed (exit $EXIT_CODE). Please try again.
 -# sent by delegate" 2>/dev/null
   NOTIFY_EXIT=$?
