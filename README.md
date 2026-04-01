@@ -1,27 +1,28 @@
 # openclaw-config
 
-Source control for the openclaw gateway: configs, skills, agent prompts, and issue tracker.
+Source control for the Discord delegation pipeline: configs, agent prompts, scripts, and issue tracker.
 
 ## Structure
 
 ```
 config/
-  openclaw.json          # Gateway config (secrets redacted — use .env for real values)
+  openclaw.json          # Bot config (secrets redacted — use .env for real values)
 workspace/
-  AGENTS.md              # Gemini workspace routing rules
-  skills/
-    delegate/            # Core delegation skill — routes to Claude
-    discord-send/        # Direct Discord message skill
-    quota/               # Gemini quota checker
-    gemini-requests/     # Real-time quota via exec-dispatch
-    routing-audit/       # Run test suite and audit logs
+  AGENTS.md              # Archived — openclaw-gateway disabled
+  skills/                # Archived — openclaw-gateway disabled
 agents/
   openclaw-CLAUDE.md     # Claude config for projects/openclaw/ (openclaw_claude agent)
   projects-CLAUDE.md     # Claude config for projects/*/ (sub-session override)
 bin/
-  delegate               # Delegation script — Gemini calls this, it invokes Claude
+  delegate               # Delegation script — called by discord-bot, invokes Claude
+  discord-bot.py         # Discord gateway — listens for DMs, calls delegate
+  discord-send           # Discord REST sender — curl wrapper around Discord API v10
   route-audit            # Log analysis script
   run-tests              # Full test suite runner
+  session-reset          # Gemini session reset (legacy, no-op)
+config/
+  systemd/user/
+    discord-bot.service  # Systemd service for discord-bot.py
 scripts/
   sync-from-live.sh      # Pull live configs into repo
   sync-to-live.sh        # Deploy repo configs to live paths
@@ -34,13 +35,14 @@ ISSUES.md                # Issue index
 | Repo path | Live path |
 |-----------|-----------|
 | `config/openclaw.json` | `~/.openclaw/openclaw.json` |
-| `workspace/AGENTS.md` | `~/.openclaw/workspace/AGENTS.md` |
-| `workspace/skills/*/SKILL.md` | `~/.openclaw/workspace/skills/*/SKILL.md` |
 | `agents/openclaw-CLAUDE.md` | `~/projects/openclaw/CLAUDE.md` |
 | `agents/projects-CLAUDE.md` | `~/projects/CLAUDE.md` |
 | `bin/delegate` | `~/.local/bin/delegate` |
+| `bin/discord-bot.py` | `~/.local/bin/discord-bot.py` |
+| `bin/discord-send` | `~/.local/bin/discord-send` |
 | `bin/route-audit` | `~/.local/bin/route-audit` |
 | `bin/run-tests` | `~/.local/bin/run-tests` |
+| `config/systemd/user/discord-bot.service` | `~/.config/systemd/user/discord-bot.service` |
 
 ## Workflow
 
@@ -49,7 +51,7 @@ ISSUES.md                # Issue index
 1. Edit the file in this repo
 2. Reference the issue ID in your commit: `fix(OC-001): description`
 3. Run `scripts/sync-to-live.sh` to deploy
-4. Restart gateway if needed: `systemctl --user restart openclaw-gateway`
+4. Restart bot if needed: `systemctl --user restart discord-bot`
 
 ### Pulling in live changes
 
@@ -70,7 +72,7 @@ Types: fix | feat | config | sync | docs
 Examples:
 - `fix(OC-001): set agents.retry.attempts to reduce RPM burn`
 - `feat(OC-008): add per-project session isolation`
-- `sync(OC-003): allowBundled set to __none__ to disable bundled skills`
+- `sync(misc): update delegate script`
 
 ## Secrets
 
@@ -79,4 +81,3 @@ Examples:
 ## Issues
 
 See [ISSUES.md](ISSUES.md) for the full tracker.
-Open bugs: OC-001 (retry count wontfix), OC-002 (silent drop on RPM exhaustion). 18 issues tracked.

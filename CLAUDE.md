@@ -48,9 +48,12 @@ What was changed.
 
 | What | Path |
 |------|------|
-| Gateway config | `/home/pranav/.openclaw/openclaw.json` |
-| Gemini routing | `/home/pranav/.openclaw/workspace/AGENTS.md` |
-| Skills | `/home/pranav/.openclaw/workspace/skills/<name>/SKILL.md` |
+| Bot config (token) | `/home/pranav/.openclaw/openclaw.json` |
+| Discord bot | `/home/pranav/.local/bin/discord-bot.py` |
+| Discord sender | `/home/pranav/.local/bin/discord-send` |
 | Delegate script | `/home/pranav/.local/bin/delegate` |
+| Systemd service | `~/.config/systemd/user/discord-bot.service` |
+
+Restart bot after changes: `systemctl --user restart discord-bot`
 
 Check open issues before starting: `cat ISSUES.md`
