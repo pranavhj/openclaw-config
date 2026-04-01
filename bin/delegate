@@ -72,6 +72,18 @@ done
   echo "projects: ${PROJECTS:-none}"
 } >> "$LOGFILE"
 
+# --- Recent message history (last 3 prior messages, for Claude context) ---
+HISTORY=$(grep '"event":"delegate_recv"' "$TIMELINE_LOG" 2>/dev/null | tail -4 | head -3 | python3 -c "
+import sys, json
+msgs = []
+for line in sys.stdin:
+    try:
+        e = json.loads(line.strip())
+        msgs.append(e.get('msg_preview','')[:120])
+    except: pass
+print('\n'.join(f'- {m}' for m in msgs))
+" 2>/dev/null)
+
 # --- Build prompt ---
 PROMPT_FILE=$(mktemp /tmp/delegate-prompt-XXXXXX.txt)
 cat > "$PROMPT_FILE" << 'HEADER'
@@ -79,6 +91,9 @@ cat > "$PROMPT_FILE" << 'HEADER'
 HEADER
 printf 'Channel: %s\nTarget: %s\n\n' "$CHANNEL" "$TARGET" >> "$PROMPT_FILE"
 printf '## Known projects in /home/pranav/projects/\n%s\n\n' "${PROJECTS:-none}" >> "$PROMPT_FILE"
+if [[ -n "$HISTORY" ]]; then
+  printf '## Recent messages (context only — do not reply to these)\n%s\n\n' "$HISTORY" >> "$PROMPT_FILE"
+fi
 printf '## Request\n%s\n' "$MESSAGE" >> "$PROMPT_FILE"
 
 PROMPT_SIZE=$(wc -c < "$PROMPT_FILE")
