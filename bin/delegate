@@ -158,8 +158,11 @@ TS_AGENT_START=$(ts_ms)
 printf '{"ts":"%s","event":"agent_start","channel":"%s","target":"%s"}\n' \
   "$TS_AGENT_START" "$CHANNEL" "$TARGET" >> "$TIMELINE_LOG"
 
-OUTPUT=$(cd "$WORK_DIR" && agent --continue --permission-mode bypassPermissions --print "$(cat "$PROMPT_FILE")" 2>&1)
-EXIT_CODE=$?
+AGENT_OUT_FILE=$(mktemp /tmp/openclaw/agent-out-XXXXXX.txt)
+cd "$WORK_DIR" && agent --continue --permission-mode bypassPermissions --print "$(cat "$PROMPT_FILE")" 2>&1 | tee "$AGENT_OUT_FILE"
+EXIT_CODE=${PIPESTATUS[0]}
+OUTPUT=$(cat "$AGENT_OUT_FILE")
+rm -f "$AGENT_OUT_FILE"
 rm -f "$PROMPT_FILE"
 
 # Cleanup downloaded attachments
