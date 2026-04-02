@@ -139,6 +139,15 @@ if [[ -n "$HISTORY" ]]; then
 fi
 printf '## Request\n%s\n' "$MESSAGE" >> "$PROMPT_FILE"
 
+# Add attachments section if present
+if [[ -n "$DELEGATE_ATTACHMENTS" ]]; then
+  printf '\n## Attachments\nThe following files were uploaded with this message (use the Read tool to view them):\n' >> "$PROMPT_FILE"
+  IFS=',' read -ra ATTACH_PATHS <<< "$DELEGATE_ATTACHMENTS"
+  for path in "${ATTACH_PATHS[@]}"; do
+    printf '%s\n' "$path" >> "$PROMPT_FILE"
+  done
+fi
+
 PROMPT_SIZE=$(wc -c < "$PROMPT_FILE")
 TS_PROMPT=$(ts_ms)
 printf '{"ts":"%s","event":"prompt_ready","file":"%s","bytes":%d}\n' \
