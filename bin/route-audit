@@ -89,7 +89,7 @@ $TIMELINE_LOG
 PROMPT_DATA
 
 # Run Claude Opus for the audit analysis
-cd /home/pranav/projects/openclaw && agent --continue --permission-mode bypassPermissions --model sonnet --print "$(cat "$PROMPT_FILE")"
+cd /home/pranav/projects/openclaw && agent-smart --continue --permission-mode bypassPermissions --model sonnet --print "$(cat "$PROMPT_FILE")"
 EXIT=$?
 
 rm -f "$PROMPT_FILE"
