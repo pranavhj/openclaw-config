@@ -110,7 +110,7 @@ while i < len(lines):
     try:
         e = json.loads(lines[i].strip())
         if e.get('event') == 'delegate_recv':
-            msg = e.get('msg_preview','')[:120]
+            msg = e.get('msg_preview','')[:300]
             proj = 'openclaw'
             for j in range(i+1, min(i+5, len(lines))):
                 try:
