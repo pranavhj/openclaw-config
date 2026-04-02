@@ -122,8 +122,8 @@ while i < len(lines):
             entries.append((proj, msg))
     except: pass
     i += 1
-# last 4 entries, skip most recent (current message)
-recent = entries[-4:-1] if len(entries) >= 2 else entries[:-1]
+# last 5 entries, skip most recent (current message)
+recent = entries[-5:-1] if len(entries) >= 2 else entries[:-1]
 for proj, msg in recent:
     print(f'- [{proj}] {msg}')
 " 2>/dev/null)
