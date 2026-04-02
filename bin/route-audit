@@ -1,210 +1,94 @@
 #!/bin/bash
-# Daily routing audit — runs via systemd timer, bypasses Gemini entirely
-# Gathers logs from yesterday (or today if run mid-day), passes to Claude for analysis
+# Daily routing audit — analyzes delegate logs and discord-bot health
+# Sends summary to Discord via discord-send
 
 DATE="${1:-$(date -d yesterday +%Y-%m-%d)}"
 LOGDIR="/tmp/openclaw"
-SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
 DISCORD_TARGET="1482473282925101217"
 PROMPT_FILE=$(mktemp /tmp/route-audit-XXXXXX.txt)
 
 # Gather delegate log
-DELEGATE_LOG=""
 if [ -f "$LOGDIR/delegate-$DATE.log" ]; then
     DELEGATE_LOG=$(cat "$LOGDIR/delegate-$DATE.log")
 else
     DELEGATE_LOG="(no delegate log for $DATE)"
 fi
 
-# Gather timeline log (machine-parseable JSON-lines)
-TIMELINE_LOG=""
+# Gather timeline log
 if [ -f "$LOGDIR/timeline-$DATE.log" ]; then
     TIMELINE_LOG=$(cat "$LOGDIR/timeline-$DATE.log")
 else
     TIMELINE_LOG="(no timeline log for $DATE)"
 fi
 
-# Gather openclaw gateway log — only exec and Discord send lines
-GATEWAY_LOG=""
-if [ -f "$LOGDIR/openclaw-$DATE.log" ]; then
-    GATEWAY_LOG=$(grep -E '"subsystem":"exec"|Sent via Discord|"subsystem":"tools"' "$LOGDIR/openclaw-$DATE.log" | tail -50)
-else
-    GATEWAY_LOG="(no gateway log for $DATE)"
-fi
+# Discord bot service health snapshot
+BOT_STATUS=$(systemctl --user status discord-bot --no-pager -l 2>&1 | head -20)
+BOT_RESTARTS=$(journalctl --user -u discord-bot --since "$DATE 00:00:00" --until "$DATE 23:59:59" --no-pager 2>/dev/null | grep -c "Started discord-bot" || echo 0)
+BOT_DISPATCHES=$(journalctl --user -u discord-bot --since "$DATE 00:00:00" --until "$DATE 23:59:59" --no-pager 2>/dev/null | grep -c "dispatch channel" || echo 0)
 
-# Parse all sessions from that date into a summary
-SESSION_SUMMARY=$(python3 -c "
-import json, os, glob
-
-sessions_dir = '$SESSIONS_DIR'
-target_date = '$DATE'
-results = []
-
-for f in sorted(glob.glob(os.path.join(sessions_dir, '*.jsonl'))):
-    try:
-        with open(f) as fh:
-            first_line = fh.readline()
-            meta = json.loads(first_line)
-            ts = meta.get('timestamp', '')
-            if not ts.startswith(target_date):
-                continue
-            fh.seek(0)
-            lines = fh.readlines()
-    except:
-        continue
-
-    session_id = os.path.basename(f)
-    events = []
-    for line in lines:
-        msg = json.loads(line)
-        t = msg.get('type')
-        if t != 'message':
-            continue
-        m = msg.get('message', {})
-        role = m.get('role', '')
-        content = m.get('content', [])
-        model = m.get('model', '')
-        err = m.get('errorMessage', '')
-        stop = m.get('stopReason', '')
-        ts = msg.get('timestamp', '')
-
-        if err:
-            # Parse nested error JSON
-            try:
-                parsed = json.loads(err)
-                inner = parsed.get('error', {}).get('message', '')
-                if isinstance(inner, str) and inner.startswith('{'):
-                    inner_parsed = json.loads(inner)
-                    err_short = f\"{inner_parsed.get('error',{}).get('code','')} {inner_parsed.get('error',{}).get('message','')[:80]}\"
-                else:
-                    err_short = inner[:100]
-            except:
-                err_short = err[:100]
-            events.append(f'  [{ts}] {role} ERROR ({model}): {err_short}')
-        elif not content:
-            events.append(f'  [{ts}] {role}: (empty) stop={stop}')
-        elif isinstance(content, list):
-            for c in content:
-                if isinstance(c, dict):
-                    ct = c.get('type','')
-                    if ct == 'text':
-                        text = c.get('text','').replace(chr(10),' ')[:120]
-                        events.append(f'  [{ts}] {role}: {text}')
-                    elif ct == 'toolCall':
-                        name = c.get('name','')
-                        args = c.get('arguments',{})
-                        cmd = args.get('command','')[:150] if isinstance(args, dict) else str(args)[:150]
-                        events.append(f'  [{ts}] TOOL_CALL {name}: {cmd}')
-                    elif ct == 'tool_use':
-                        name = c.get('name','')
-                        inp = str(c.get('input',''))[:150]
-                        events.append(f'  [{ts}] TOOL {name}: {inp}')
-
-    if events:
-        results.append(f'Session: {session_id}')
-        results.extend(events[:30])
-        results.append('')
-
-print(chr(10).join(results) if results else '(no sessions for this date)')
-" 2>/dev/null)
-
-# Current state of routing files
-AGENTS_CONTENT=$(cat "$HOME/.openclaw/workspace/AGENTS.md" 2>/dev/null || echo "(missing)")
-SKILL_CONTENT=$(cat "$HOME/.openclaw/workspace/skills/delegate/SKILL.md" 2>/dev/null || echo "(missing)")
-
-# Workspace integrity snapshot
-ALLOWED_SKILLS="delegate discord-send quota gemini-requests routing-audit"
-ACTUAL_SKILLS=$(ls "$HOME/.openclaw/workspace/skills/" 2>/dev/null | sort | tr '\n' ' ')
-ROGUE_SKILLS=""
-for S in $(ls "$HOME/.openclaw/workspace/skills/" 2>/dev/null); do
-  echo "$ALLOWED_SKILLS" | grep -qw "$S" || ROGUE_SKILLS="$ROGUE_SKILLS $S"
-done
-WORKSPACE_INTEGRITY="Skills present: $ACTUAL_SKILLS"
-if [[ -n "$ROGUE_SKILLS" ]]; then
-  WORKSPACE_INTEGRITY="$WORKSPACE_INTEGRITY | ROGUE SKILLS:$ROGUE_SKILLS"
-fi
-ALLOWED_BINS="delegate route-audit run-tests openclaw-timeline route-log send-gemini-stats agent oc httpx gq claude"
+# Binary integrity check
+ALLOWED_BINS="delegate route-audit run-tests discord-bot.py discord-send bot-logs send-gemini-stats session-reset agent oc httpx gq claude"
 ROGUE_BINS=""
 for B in $(ls /home/pranav/.local/bin/ 2>/dev/null); do
-  echo "$ALLOWED_BINS" | grep -qw "$B" || ROGUE_BINS="$ROGUE_BINS $B"
+    echo "$ALLOWED_BINS" | grep -qw "$B" || ROGUE_BINS="$ROGUE_BINS $B"
 done
+BIN_INTEGRITY="Allowed: $ALLOWED_BINS"
 if [[ -n "$ROGUE_BINS" ]]; then
-  WORKSPACE_INTEGRITY="$WORKSPACE_INTEGRITY | ROGUE BINARIES:$ROGUE_BINS"
+    BIN_INTEGRITY="$BIN_INTEGRITY | ROGUE:$ROGUE_BINS"
 fi
-AGENTS_LINES=$(wc -l < "$HOME/.openclaw/workspace/AGENTS.md" 2>/dev/null || echo 0)
-WORKSPACE_INTEGRITY="$WORKSPACE_INTEGRITY | AGENTS.md lines: $AGENTS_LINES"
 
-# Build prompt file
-cat > "$PROMPT_FILE" << 'PROMPT_HEADER'
+# Build prompt
+cat > "$PROMPT_FILE" << PROMPT_HEADER
 ## Task: Daily Routing Audit
 
-You are auditing the openclaw routing system. Analyze the logs below and:
+You are auditing the openclaw system for $DATE. Analyze the logs and send a concise summary to Discord.
 
-1. For each user request, determine: was it delegated to Claude (correct) or answered by Gemini directly (incorrect)?
-2. Check the timeline log for end-to-end timing of each delegation (delegate_recv → sanitize → agent_start → agent_done → delegate_exit)
-3. Flag any errors — rate limits, empty responses, background exec, newline failures (exit 127), missing delegations
-4. If you find a simple fix (editing AGENTS.md, skill files, or other .md config files), make the fix directly
-5. Send a concise summary to Discord with findings using: openclaw message send --channel discord --target 1482473282925101217 --message "<summary>"
+**Pipeline (new architecture — no Gemini):**
+Discord DM → discord-bot.py (systemd) → subprocess delegate → agent --model sonnet --continue → discord-send → Discord
 
-**Expected flow (passthrough router architecture):**
-- Gemini receives message → immediately delegates via exec(delegate ...) — no thinking, no classification
-- delegate script: sanitizes newlines/quotes → builds prompt → runs Claude agent → Claude sends to Discord → returns SENT
-- Gemini receives SENT → stops. No further output. No retries. No extra tool calls.
+**What to check:**
+1. Delegation success rate: how many delegate_recv events vs agent_done with exit_code=0
+2. Failure patterns: failure_detected events, non-zero exit codes, "hit your limit" (Claude usage cap)
+3. Timing: flag any agent_done duration_ms > 60000 (slow) or < 3000 (suspiciously fast — likely error)
+4. Lock contention: lock_blocked events (user sent message while previous was running)
+5. Discord bot health: restarts during the day, dispatch count matches delegate_recv count
+6. Rogue binaries: anything unexpected in ~/.local/bin/
 
-**Red flags (CRITICAL — immediate action required):**
-- Gemini used `write` tool on ANY file in ~/.openclaw/workspace/ — config tampering (this happened 2026-03-23: Gemini overwrote AGENTS.md)
-- Gemini used `read` tool on AGENTS.md or SKILL.md during routing — should never read config files, just delegate
-- Rogue skill in workspace/skills/ beyond: delegate, discord-send, quota, gemini-requests, routing-audit — Claude or Gemini created an unauthorized skill (this happened 2026-03-23: Claude created alexa skill)
-- Any binary in ~/.local/bin/ not in expected set — rogue exec target created for Gemini to call
+**Red flags:**
+- agent_done exit_code != 0 — delegation failed
+- output_preview contains "hit your limit" — Claude Code usage cap hit, no response to user
+- duration_ms < 3000 with exit_code != 0 — fast failure, likely auth/quota error
+- BOT_RESTARTS > 2 — service instability
+- lock_blocked with no follow-up from user — dropped message
+- delegate_recv with no matching agent_done — delegate was killed mid-run (service restart race)
 
-**Red flags (routing failures):**
-- Gemini answering directly (text response without exec delegate) — CRITICAL routing failure
-- Gemini calling web_search or any tool other than exec — should ONLY exec delegate
-- Background exec ("Command still running") — should be foreground with yieldMs:120000
-- Missing yieldMs in exec call — will background
-- Multiple exec calls for one request — should be exactly one
-- Rate limit errors (429) — check if gateway retried (retry.attempts should be 1)
-- Exit code 127 in delegate log — newline in message broke bash (OC-016)
-- Gemini doing extra turns after exec returns SENT — should stop immediately
-- Missing delegate_recv/delegate_exit in timeline for a gateway exec event — indicates delegate script crash
+**Send your summary using:**
+discord-send --target $DISCORD_TARGET --message "<summary>"
 
-**Timeline log events (JSON-lines):**
-- delegate_recv: message received by delegate script
-- sanitize: message sanitized (check orig_len vs sanitized_len for newline removals)
-- lock_acquired / lock_blocked: concurrency control
-- prompt_ready: Claude prompt built (check byte size)
-- agent_start / agent_done: Claude agent execution (check duration_ms, exit_code)
-- failure_detected / failure_notified: delegation failed, user was notified
-- delegate_exit: final output returned to Gemini (check total_ms)
-
+Keep it brief — bullet points, key numbers, any action items.
 PROMPT_HEADER
 
 cat >> "$PROMPT_FILE" << PROMPT_DATA
+
 ## Date: $DATE
+
+## Discord Bot Health
+Service restarts on $DATE: $BOT_RESTARTS
+Dispatch events in journal: $BOT_DISPATCHES
+
+$BOT_STATUS
+
+## Binary Integrity
+$BIN_INTEGRITY
 
 ## Delegate Log (human-readable)
 $DELEGATE_LOG
 
-## Timeline Log (JSON-lines, machine-parseable)
+## Timeline Log (JSON-lines)
 $TIMELINE_LOG
-
-## Gateway Log (exec and send events only)
-$GATEWAY_LOG
-
-## Session Summaries (Gemini JSONL)
-$SESSION_SUMMARY
-
-## Workspace Integrity Snapshot
-$WORKSPACE_INTEGRITY
-
-## Current AGENTS.md
-$AGENTS_CONTENT
-
-## Current Delegate SKILL.md
-$SKILL_CONTENT
 PROMPT_DATA
 
-# Run Claude with prompt from file
+# Run Claude Opus for the audit analysis
 cd /home/pranav/projects/openclaw && agent --continue --permission-mode bypassPermissions --model claude-opus-4-6 --print "$(cat "$PROMPT_FILE")"
 EXIT=$?
 
