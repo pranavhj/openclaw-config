@@ -21,7 +21,7 @@ json_safe() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' '; }
 
 # --- Log: delegate_recv ---
 printf '{"ts":"%s","event":"delegate_recv","channel":"%s","target":"%s","msg_len":%d,"msg_preview":"%s"}\n' \
-  "$TS_RECV" "$CHANNEL" "$TARGET" "${#MESSAGE}" "$(json_safe "${MESSAGE:0:80}")" >> "$TIMELINE_LOG"
+  "$TS_RECV" "$CHANNEL" "$TARGET" "${#MESSAGE}" "$(json_safe "${MESSAGE:0:300}")" >> "$TIMELINE_LOG"
 
 # --- Sanitization ---
 ORIG_LEN=${#MESSAGE}
