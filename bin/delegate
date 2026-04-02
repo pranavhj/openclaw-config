@@ -162,6 +162,15 @@ OUTPUT=$(cd "$WORK_DIR" && agent --continue --permission-mode bypassPermissions 
 EXIT_CODE=$?
 rm -f "$PROMPT_FILE"
 
+# Cleanup downloaded attachments
+if [[ -n "$DELEGATE_ATTACHMENTS" ]]; then
+  IFS=',' read -ra ATTACH_PATHS <<< "$DELEGATE_ATTACHMENTS"
+  for path in "${ATTACH_PATHS[@]}"; do
+    rm -f "$path"
+  done
+  rmdir "$(dirname "${ATTACH_PATHS[0]}")" 2>/dev/null || true
+fi
+
 TS_AGENT_DONE=$(ts_ms)
 DURATION_MS=$(( $(date -d "$TS_AGENT_DONE" +%s%3N 2>/dev/null || echo 0) - $(date -d "$TS_AGENT_START" +%s%3N 2>/dev/null || echo 0) ))
 
