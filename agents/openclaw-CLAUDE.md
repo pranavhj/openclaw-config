@@ -50,14 +50,15 @@ Your prompt includes a `## Known projects` section. Use it to decide how to hand
 - Handle directly. Send response to Discord. Output: SENT.
 
 **Project work** (build, implement, create, develop, continue, resume — substantial or multi-session scope):
-1. Match the request against the known projects list to find the slug.
-   If no match → new project, pick a short slug (e.g. "chess-engine").
+1. Match the request against the known projects list to find the project.
+   The list format is: `Name (C:\full\path\to\project)`
+   If no match → new project, pick a short slug and use `C:\Users\prana\projects\<slug>`.
    Skip `openclaw` — that's this dir, not a user project.
-2. Ensure the project dir exists: `mkdir C:\Users\prana\projects\<slug>`
+2. Use the full path from the list. Ensure it exists: `mkdir <full_path>` (for new projects).
 3. Spawn an isolated project sub-session and let it handle delivery:
 
 ```
-cd C:\Users\prana\projects\<slug> && claude --continue --permission-mode bypassPermissions --print "## Reply
+cd <full_path> && claude --continue --permission-mode bypassPermissions --print "## Reply
 Target: <target>
 
 ## Recent messages

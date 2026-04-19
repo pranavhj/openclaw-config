@@ -135,12 +135,25 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
          orig_len, sanitized_len, t0, tl, log):
 
     # --- Discover projects ---
-    projects_dir = Path.home() / 'projects'
-    if projects_dir.exists():
-        projects = sorted(p.name for p in projects_dir.iterdir() if p.is_dir())
-    else:
-        projects = []
-    projects_str = ', '.join(projects) if projects else 'none'
+    # Scan multiple roots; include full path so Claude can cd to the right dir.
+    # Only include dirs that have a .claude subdir (active Claude Code sessions)
+    # or a PROGRESS.md (explicitly tracked by openclaw).
+    PROJECT_ROOTS = [
+        Path.home() / 'projects',
+        Path.home() / 'AndroidStudioProjects',
+        Path.home() / 'PycharmProjects',
+        Path.home() / 'UnityProjects',
+    ]
+    projects = []  # list of (name, full_path)
+    for root in PROJECT_ROOTS:
+        if not root.exists():
+            continue
+        for d in sorted(root.iterdir()):
+            if not d.is_dir():
+                continue
+            if (d / '.claude').exists() or (d / 'PROGRESS.md').exists():
+                projects.append((d.name, str(d)))
+    projects_str = '\n'.join(f'{name} ({path})' for name, path in projects) if projects else 'none'
 
     # --- Log: human-readable header ---
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -183,7 +196,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     # --- Build prompt ---
     prompt = '## Reply\n'
     prompt += f'Channel: {channel}\nTarget: {target}\n\n'
-    prompt += f'## Known projects in {projects_dir}/\n{projects_str}\n\n'
+    prompt += f'## Known projects\n{projects_str}\n\n'
     if history:
         prompt += (
             '## Recent messages (context only \u2014 do not reply to these)\n'
