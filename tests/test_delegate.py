@@ -262,6 +262,8 @@ print('\n14. Project discovery (dirs only)')
 
 (p if 'iterdir()' in delegate_src else f)('iterdir() used for project discovery')
 (p if 'is_dir()' in delegate_src else f)('is_dir() filter present (dirs only)')
+(p if 'UNFILTERED_ROOTS' in delegate_src else f)('UNFILTERED_ROOTS defined (D:/MyData/Software)')
+(p if 'EXCLUDE_NAMES' in delegate_src else f)('EXCLUDE_NAMES defined (openclaw-config excluded)')
 
 # ── 15. Prompt structure in source ────────────────────────────────────────────
 print('\n15. Prompt structure')

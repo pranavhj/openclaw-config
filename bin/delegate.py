@@ -136,24 +136,36 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
 
     # --- Discover projects ---
     # Scan multiple roots; include full path so Claude can cd to the right dir.
-    # Only include dirs that have a .claude subdir (active Claude Code sessions)
-    # or a PROGRESS.md (explicitly tracked by openclaw).
-    PROJECT_ROOTS = [
+    # Filtered roots: only dirs with .claude (active session) or PROGRESS.md (tracked).
+    # Unfiltered roots: include all subdirs (user explicitly wants everything visible).
+    FILTERED_ROOTS = [
         Path.home() / 'projects',
         Path.home() / 'AndroidStudioProjects',
         Path.home() / 'PycharmProjects',
         Path.home() / 'UnityProjects',
+    ]
+    UNFILTERED_ROOTS = [
         Path('D:/MyData/Software'),
     ]
+    # Dirs to always exclude (infra/config repos, not user projects)
+    EXCLUDE_NAMES = {'openclaw-config'}
+
     projects = []  # list of (name, full_path)
-    for root in PROJECT_ROOTS:
+    for root in FILTERED_ROOTS:
         if not root.exists():
             continue
         for d in sorted(root.iterdir()):
-            if not d.is_dir():
+            if not d.is_dir() or d.name in EXCLUDE_NAMES:
                 continue
             if (d / '.claude').exists() or (d / 'PROGRESS.md').exists():
                 projects.append((d.name, str(d)))
+    for root in UNFILTERED_ROOTS:
+        if not root.exists():
+            continue
+        for d in sorted(root.iterdir()):
+            if not d.is_dir() or d.name in EXCLUDE_NAMES:
+                continue
+            projects.append((d.name, str(d)))
     projects_str = '\n'.join(f'{name} ({path})' for name, path in projects) if projects else 'none'
 
     # --- Log: human-readable header ---
