@@ -27,3 +27,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-019](issues/OC-019-gemini-handled-requests-directly-bypassing-delegation.md) | bug | fixed | Gemini used write tool and replied directly when exec-completed + new user message arrived in same turn | `fix(OC-019)` |
 | [OC-020](issues/OC-020-repo-out-of-sync-after-gateway-migration.md) | config | fixed | Repo out of sync after Gemini→discord-bot.py migration: missing bin scripts + stale architecture doc | `docs(OC-020)` |
 | [OC-021](issues/OC-021-windows-migration.md) | feature | fixed | Migrate openclaw pipeline to Windows — rewrite all bash scripts to Python, eliminate VM dependency | `feat(OC-021)` |
+| [OC-022](issues/OC-022-port-tests-to-python.md) | feature | fixed | Port Linux bash test suites to Windows Python (test_delegate.py, test_integration.py, test_claude_behavior.py, run-tests.py) | `feat(OC-022)` |

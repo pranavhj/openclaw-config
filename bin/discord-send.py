@@ -5,6 +5,7 @@ Usage: python discord-send.py --target CHANNEL_ID --message "text"
 """
 import argparse
 import json
+import os
 import sys
 import urllib.request
 import urllib.error
@@ -48,6 +49,11 @@ def main():
         with urllib.request.urlopen(req) as resp:
             if resp.status == 200:
                 print('\u2705 Sent via Discord REST')
+                # Test-mode capture: append message to file if env var set
+                capture_file = os.environ.get('OPENCLAW_TEST_CAPTURE_FILE')
+                if capture_file:
+                    with open(capture_file, 'a', encoding='utf-8') as cf:
+                        cf.write(args.message + '\n---MSG_SEP---\n')
             else:
                 print(f'discord-send: HTTP {resp.status}', file=sys.stderr)
                 sys.exit(1)
