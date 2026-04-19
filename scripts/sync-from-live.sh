@@ -21,6 +21,15 @@ cp /home/pranav/.local/bin/bot-logs                                      "$REPO/
 [ -f /home/pranav/.local/bin/run-tests ] && \
   cp /home/pranav/.local/bin/run-tests                                   "$REPO/bin/run-tests"
 
+# Test suites
+mkdir -p "$REPO/tests"
+[ -f /home/pranav/test_delegate.sh ] && \
+  cp /home/pranav/test_delegate.sh                                        "$REPO/tests/test_delegate.sh"
+[ -f /home/pranav/test_integration.sh ] && \
+  cp /home/pranav/test_integration.sh                                     "$REPO/tests/test_integration.sh"
+[ -f /home/pranav/test_claude_behavior.sh ] && \
+  cp /home/pranav/test_claude_behavior.sh                                 "$REPO/tests/test_claude_behavior.sh"
+
 [ -f /home/pranav/docs/openclaw-architecture.md ] && \
   cp /home/pranav/docs/openclaw-architecture.md                          "$REPO/docs/openclaw-architecture.md"
 
