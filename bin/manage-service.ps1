@@ -36,7 +36,14 @@ $LogFile     = "$LogDir\bot.log"
 $ServiceName = "discord-bot"
 
 $ClaudeDir   = "C:\Users\prana\AppData\Local\Microsoft\WinGet\Packages\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe"
-$ExtraEnv    = "USERPROFILE=C:\Users\prana HOMEPATH=\Users\prana HOMEDRIVE=C: LOCALAPPDATA=C:\Users\prana\AppData\Local PATH=$ClaudeDir;C:\Python310;C:\Windows\System32;C:\Windows"
+# NSSM AppEnvironmentExtra is a REG_MULTI_SZ — each var must be a separate array entry
+$ExtraEnv    = @(
+    "USERPROFILE=C:\Users\prana",
+    "HOMEPATH=\Users\prana",
+    "HOMEDRIVE=C:",
+    "LOCALAPPDATA=C:\Users\prana\AppData\Local",
+    "PATH=$ClaudeDir;C:\Python310;C:\Windows\System32;C:\Windows"
+)
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 function Nssm { & $Nssm @args }
@@ -51,8 +58,10 @@ function Apply-Config {
     Nssm set $ServiceName AppRotateFiles   1
     Nssm set $ServiceName AppRotateOnline  1
     Nssm set $ServiceName AppRotateBytes   5000000
-    Nssm set $ServiceName AppEnvironmentExtra $ExtraEnv
     Nssm set $ServiceName Start            SERVICE_AUTO_START
+    # AppEnvironmentExtra is REG_MULTI_SZ — write directly to registry
+    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName\Parameters"
+    Set-ItemProperty -Path $regPath -Name AppEnvironmentExtra -Value $ExtraEnv -Type MultiString
     Write-Host "Config applied."
 }
 
