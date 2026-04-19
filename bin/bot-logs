@@ -1,0 +1,2 @@
+#!/bin/bash
+journalctl --user -u discord-bot -f --no-pager

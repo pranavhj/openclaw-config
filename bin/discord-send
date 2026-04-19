@@ -1,0 +1,35 @@
+#!/bin/bash
+# discord-send --channel <ch> --target <target> --message <msg>
+# Sends a message to a Discord channel via REST API.
+# --target is used as the Discord channel ID.
+
+TOKEN=$(python3 -c "import json; print(json.load(open('/home/pranav/.openclaw/openclaw.json'))['channels']['discord']['token'])" 2>/dev/null)
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --channel) shift 2 ;;
+        --target) TARGET="$2"; shift 2 ;;
+        --message) MESSAGE="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+
+if [[ -z "$TOKEN" || -z "$TARGET" || -z "$MESSAGE" ]]; then
+    echo "discord-send: missing token, target, or message" >&2
+    exit 1
+fi
+
+MSG_JSON=$(python3 -c "import json, sys; print(json.dumps(sys.argv[1]))" "$MESSAGE")
+
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "https://discord.com/api/v10/channels/$TARGET/messages" \
+    -H "Authorization: Bot $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"content\": $MSG_JSON}")
+
+if [[ "$HTTP_STATUS" == "200" ]]; then
+    echo "✅ Sent via Discord REST"
+else
+    echo "discord-send: HTTP $HTTP_STATUS" >&2
+    exit 1
+fi

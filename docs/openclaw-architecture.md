@@ -1,5 +1,5 @@
 # openclaw System Architecture
-_Last updated: 2026-03-23 (OC-017, OC-018)_
+_Last updated: 2026-04-18 (OC-020 — post-Gemini-gateway migration)_
 
 ---
 
@@ -9,42 +9,36 @@ _Last updated: 2026-03-23 (OC-017, OC-018)_
 ┌─────────────────────────────────────────────────────────────────┐
 │                     INBOUND CHANNEL                              │
 │                                                                  │
-│   Discord DM ──────────────────────► openclaw gateway            │
-│   (allowFrom: 1277144623231537274)    port 18789                 │
+│   Discord DM ──────────────────────► discord-bot.py             │
+│   (allowFrom: 1277144623231537274)    systemd service            │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│               GEMINI (agent:main) — PASSTHROUGH ROUTER           │
+│          discord-bot.py  — /home/pranav/.local/bin/              │
 │                                                                  │
-│  Model: google/gemini-2.5-flash                                  │
-│  Thinking: off (thinkingDefault: "off")                          │
-│  Fallbacks: none (empty array)                                   │
-│  Workspace: /home/pranav/.openclaw/workspace/                    │
-│  Skills: 5 workspace only (bundled disabled via                  │
-│          allowBundled: ["__none__"])                              │
+│  Library: discord.py with Message Content Intent                 │
+│  Token: read from ~/.openclaw/openclaw.json at startup           │
+│  Allowlist: ALLOWED_USER = 1277144623231537274 (DMs only)        │
 │                                                                  │
-│  Reads on startup:                                               │
-│    AGENTS.md   → passthrough routing rules (~15 lines)           │
-│    SOUL.md     → # unused (stripped)                             │
-│    IDENTITY.md → # unused (stripped)                             │
-│    TOOLS.md    → # unused (stripped)                             │
-│    USER.md     → # unused (stripped)                             │
-│    HEARTBEAT.md → heartbeat config (kept)                        │
+│  On message:                                                     │
+│    1. Ignore bots and non-allowlisted users                      │
+│    2. Download attachments → /tmp/openclaw/attachments/<msg_id>/ │
+│       Set DELEGATE_ATTACHMENTS env var if any                    │
+│    3. Replace newlines with spaces                               │
+│    4. subprocess.Popen(['delegate', ch, target, content],        │
+│         start_new_session=True)   ← detached, survives restart   │
 │                                                                  │
-│  ┌──────────────────────────────────────────────────┐            │
-│  │  ALL messages → delegate skill → exec(delegate)   │            │
-│  │  After exec returns → STOP. No further output.    │            │
-│  │  No retries. No error handling. No thinking.      │            │
-│  └──────────────────────────────────────────────────┘            │
+│  Logs to journald (systemd --user unit: discord-bot.service)     │
+│  Also runs async session watcher (watch_claude_sessions):        │
+│    • Polls ~/.claude/projects/**/*.jsonl every 1s                │
+│    • Pretty-prints tool calls + text to stdout → journald        │
+│    • Shows: [project] [tool] Bash: ..., [project] [assistant] …  │
+│    • Skip memory files                                           │
 │                                                                  │
-│  Exceptions (handled directly, no delegation):                   │
-│    - Heartbeat checks → HEARTBEAT_OK                             │
-│    - /quota → exec-dispatch quota skill                          │
-│    - /gemini_requests → exec-dispatch gemini-requests skill      │
+│  View live logs: bot-logs  (journalctl --user -u discord-bot -f) │
 └─────────────────────────────────────────────────────────────────┘
-                    │ exec(delegate discord <tgt> <msg>)
-                    │ yieldMs: 120000
+                    │ subprocess.Popen (detached)
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              /home/pranav/.local/bin/delegate                     │
@@ -56,25 +50,26 @@ _Last updated: 2026-03-23 (OC-017, OC-018)_
 │     • Newlines → spaces (OC-016)                                 │
 │  3. Log: sanitize (orig_len, sanitized_len, chars_replaced)      │
 │  4. Acquire lock: /tmp/openclaw/delegate.lock (mkdir atomic)     │
-│     ├─ If locked → log lock_blocked, echo SENT, exit             │
+│     ├─ If locked → notify user via discord-send, echo SENT, exit │
 │     └─ If free → log lock_acquired, continue                     │
 │  5. Collect context:                                             │
 │     • Projects list: ls /home/pranav/projects/                   │
+│     • Recent history: last 5 entries from timeline log           │
 │  6. Build prompt in temp file (## Reply, ## Known projects,      │
-│     ## Request)                                                  │
+│     ## Recent messages, ## Request, ## Attachments if any)       │
 │  7. Log: prompt_ready (file path, bytes)                         │
 │  8. Log: agent_start → Run Claude:                               │
 │     cd /home/pranav/projects/openclaw                            │
-│     agent --continue --permission-mode bypassPermissions         │
-│            --print "$(cat $PROMPT_FILE)"                         │
+│     agent-smart --continue --permission-mode bypassPermissions   │
+│                 --model sonnet --print "$(cat $PROMPT_FILE)"     │
 │  9. Log: agent_done (exit_code, duration_ms, output_preview)     │
 │  10. If failure (exit≠0 AND output≠"SENT"):                     │
 │     • Log: failure_detected                                      │
-│     • Send error notification to Discord                         │
+│     • discord-send error notification to user                    │
 │     • Log: failure_notified                                      │
-│     • Set OUTPUT="SENT" to stop Gemini                           │
-│  11. Log: delegate_exit (total_ms, final_output)                 │
-│  12. Echo output (openclaw sees "SENT")                          │
+│  11. session-reset (clears openclaw session after each run)      │
+│  12. Log: delegate_exit (total_ms, final_output)                 │
+│  13. Echo OUTPUT                                                 │
 │                                                                  │
 │  Logs:                                                           │
 │    Human-readable: /tmp/openclaw/delegate-YYYY-MM-DD.log         │
@@ -83,21 +78,36 @@ _Last updated: 2026-03-23 (OC-017, OC-018)_
                     │
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
+│         agent-smart  — /home/pranav/.local/bin/                  │
+│                                                                  │
+│  Wrapper around `agent --continue` with auto-compaction:         │
+│    • Reads ~/.claude/projects/<cwd-key>/*.jsonl                  │
+│    • If session > 400KB: compact to last 5 message pairs         │
+│      Python: keeps user/assistant entries only, drops metadata   │
+│      Creates new UUID-named JSONL, deletes old one               │
+│    • Then: exec agent "$@"                                       │
+└─────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────┐
 │         openclaw_claude (Claude) — projects/openclaw/            │
 │                                                                  │
+│  Model: claude-sonnet-4-6 (--model sonnet)                       │
 │  Working dir: /home/pranav/projects/openclaw/                    │
 │  Config: /home/pranav/projects/openclaw/CLAUDE.md                │
-│  Session: --continue (persists across conversations)             │
+│  Session: --continue (persists across delegations)               │
 │                                                                  │
 │  Receives prompt with:                                           │
 │    ## Reply  (channel + target for response delivery)            │
 │    ## Known projects (list from /home/pranav/projects/)          │
+│    ## Recent messages (last 5, tagged by project)                │
 │    ## Request (user's full message verbatim)                     │
+│    ## Attachments (paths if files were uploaded)                 │
 │                                                                  │
 │  ┌─────────────────────────────────────────────────┐             │
 │  │  ONE-OFF request (question, analysis, fix)       │             │
 │  │  → Handle directly                               │             │
-│  │  → openclaw message send to Discord              │             │
+│  │  → discord-send to Discord                       │             │
 │  │  → Output: SENT                                  │             │
 │  └─────────────────────────────────────────────────┘             │
 │                                                                  │
@@ -107,7 +117,7 @@ _Last updated: 2026-03-23 (OC-017, OC-018)_
 │  │  → mkdir -p /home/pranav/projects/<slug>         │             │
 │  │  → Spawn isolated sub-session:                   │             │
 │  │    cd projects/<slug> &&                         │             │
-│  │    agent --continue --print "..."                │             │
+│  │    agent-smart --continue --print "..."          │             │
 │  │  → Sub-session handles delivery + outputs SENT   │             │
 │  └─────────────────────────────────────────────────┘             │
 └─────────────────────────────────────────────────────────────────┘
@@ -124,7 +134,7 @@ _Last updated: 2026-03-23 (OC-017, OC-018)_
          │              │  • Reads PROGRESS.md        │
          │              │  • Does the work            │
          │              │  • Updates PROGRESS.md      │
-         │              │  • Sends to Discord         │
+         │              │  • discord-send to Discord  │
          │              │  • Exits (one-shot)         │
          │              │  • Session history persists │
          │              │    in JSONL for next call   │
@@ -132,54 +142,108 @@ _Last updated: 2026-03-23 (OC-017, OC-018)_
          │                           │
          └───────────────────────────┘
                                      │
-                    openclaw message send --channel discord --target <tgt>
+                    discord-send --target <tgt> --message "..."
                                      ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   OUTBOUND DELIVERY                              │
 │                                                                  │
-│   Discord DM ──── channel=discord, target=1482473282925101217    │
+│   Discord DM ──── target=1482473282925101217                     │
 │   All messages end with: -# sent by claude (watermark)           │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Special Paths (bypass delegate)
+## Agent Responsibilities
+
+| Agent | Model | Working Dir | Config | Responsibility |
+|---|---|---|---|---|
+| **openclaw_claude** | claude-sonnet-4-6 | `projects/openclaw/` | `projects/openclaw/CLAUDE.md` | Entry point for all channel traffic. One-off: handles directly. Project work: spawns isolated sub-session. |
+| **Project sub-session** | claude-sonnet-4-6 | `projects/<slug>/` | `projects/CLAUDE.md` + `CLAUDE.md` | Isolated per-project Claude session. Reads PROGRESS.md, does work, updates PROGRESS.md, sends to Discord, exits. |
+| **Claude Code** (terminal) | claude-sonnet-4-6 | `/home/pranav/` | `CLAUDE.md` | Direct dev work with Pranav in terminal |
+
+---
+
+## Config Files — What Lives Where
 
 ```
-User: "run tests" / "check routing"
-    │
-    ▼
-Gemini loads routing-audit skill
-    │
-    ▼
-exec({command: 'run-tests'})
-    │
-    ▼
-/home/pranav/.local/bin/run-tests
-  • SKIP_GATEWAY_RESTART=1
-  • Runs test_delegate.sh       → unit results
-  • Runs test_integration.sh    → integration results
-  • Runs test_claude_behavior.sh → behavior results
-  • Sends formatted summary to Discord (itself, no Claude involved)
+/home/pranav/.openclaw/
+└── openclaw.json                    ← BOT + GATEWAY CONFIG
+    • Discord bot token (used by discord-bot.py)
+    • API keys (Gemini, Groq, Ollama) — retained for potential future use
+    • Gateway port: 18789 (not used by discord-bot.py path)
+    • Session idle reset: 5 minutes
 
-User: "analyze logs" / "route-audit"
-    │
-    ▼
-Gemini loads routing-audit skill → exec({command: 'route-audit'})
-    │
-    ▼
-/home/pranav/.local/bin/route-audit
-  • Gathers delegate log + timeline log + gateway log + session JSONLs
-  • Passes to: cd /home/pranav/projects/openclaw && agent --continue --model claude-opus-4-6
-  • Claude analyzes + sends Discord report
+/home/pranav/.local/bin/
+├── discord-bot.py                   ← DISCORD GATEWAY (replaces openclaw gateway)
+│   • discord.py service (systemd discord-bot.service)
+│   • Reads token from ~/.openclaw/openclaw.json
+│   • Spawns delegate as detached subprocess per message
+│   • Async session watcher: pretty-prints JSONL activity to journald
+│
+├── discord-send                     ← OUTBOUND DISCORD REST
+│   • curl POST to Discord v10 API
+│   • Reads token from ~/.openclaw/openclaw.json
+│   • Args: --target <channel_id> --message <text>
+│
+├── delegate                         ← DELEGATION ORCHESTRATOR
+│   • Sanitize, lock, log, collect context, build prompt
+│   • Calls agent-smart (not agent) for auto-compaction
+│   • --model sonnet, --continue, --permission-mode bypassPermissions
+│   • Failure notification to Discord
+│   • Dual logging: human-readable + JSON timeline
+│   • session-reset after each delegation
+│
+├── agent-smart                      ← AUTO-COMPACTING AGENT WRAPPER
+│   • Checks session size before delegating (threshold: 400KB)
+│   • Compact: keep last 5 user/assistant pairs, drop metadata
+│   • Then: exec agent "$@"
+│
+├── bot-logs                         ← LIVE LOG VIEWER
+│   • journalctl --user -u discord-bot -f --no-pager
+│
+├── route-audit                      ← DAILY LOG ANALYSIS
+│   • Gathers delegate + timeline logs + bot health from journald
+│   • cd projects/openclaw && agent-smart --continue --model sonnet
+│   • Claude analyzes routing health, sends report to Discord
+│
+└── run-tests                        ← FULL TEST SUITE RUNNER
+    • Runs all 3 test suites, sends Discord summary
 
-User: "/quota" or "/gemini_requests"
-    │
-    ▼
-Gemini exec-dispatches directly (no delegate, no Claude):
-  quota:            python3 /home/pranav/gemini_counter.py status
-  gemini-requests:  /gemini_requests gq
+/home/pranav/
+├── CLAUDE.md                        ← DIRECT TERMINAL CLAUDE CONFIG
+│   • openclaw agent instructions, user profile, response format
+│
+├── projects/
+│   ├── CLAUDE.md                    ← PROJECT SUB-SESSION GUARD
+│   │   • "You're in a project dir — do the work, don't spawn sub-sessions"
+│   │
+│   ├── openclaw/
+│   │   └── CLAUDE.md               ← OPENCLAW_CLAUDE CONFIG
+│   │       • Job: do work, send via discord-send, output SENT
+│   │       • User profile, Discord format, watermark
+│   │       • Project routing (one-off vs spawn sub-session)
+│   │
+│   ├── openclaw-config/             ← THIS REPO
+│   │
+│   └── <user-projects>/             ← Actual project work
+│       ├── PROGRESS.md              ← State bookmark (Claude maintains)
+│       └── <source files>
+
+/home/pranav/.config/systemd/user/
+└── discord-bot.service              ← SYSTEMD SERVICE
+    • KillMode=process (delegate subprocesses survive service restarts)
+    • Enabled, starts on login
+
+/home/pranav/projects/openclaw-config/  ← THIS REPO
+    config/openclaw.json             ← sanitized (secrets as ${VAR})
+    bin/discord-bot.py, discord-send, delegate, agent-smart, bot-logs
+    bin/route-audit, run-tests, session-reset, openclaw-timeline
+    agents/openclaw-CLAUDE.md
+    agents/projects-CLAUDE.md
+    scripts/sync-from-live.sh        ← copies live → repo + redacts secrets
+    scripts/sync-to-live.sh          ← deploys repo → live paths
+    docs/openclaw-architecture.md    ← this file
 ```
 
 ---
@@ -194,285 +258,103 @@ Gemini exec-dispatches directly (no delegate, no Claude):
 │   • Duration: agent_ms, total_ms
 │   • Exit code and output preview
 │
-├── timeline-YYYY-MM-DD.log          ← Machine-parseable JSON-lines
-│   Events:
-│   • delegate_recv   — message received (channel, target, msg_len, preview)
-│   • sanitize        — chars replaced (orig_len, sanitized_len)
-│   • lock_acquired   — lock obtained
-│   • lock_blocked    — duplicate run prevented
-│   • prompt_ready    — prompt file built (path, bytes)
-│   • agent_start     — Claude invocation started
-│   • agent_done      — Claude finished (exit_code, duration_ms, output)
-│   • failure_detected — delegation failed
-│   • failure_notified — error message sent to Discord
-│   • delegate_exit   — final output returned (total_ms)
-│
-└── openclaw-YYYY-MM-DD.log          ← Gateway log (all subsystems)
+└── timeline-YYYY-MM-DD.log          ← Machine-parseable JSON-lines
+    Events:
+    • delegate_recv   — message received (channel, target, msg_len, preview)
+    • sanitize        — chars replaced (orig_len, sanitized_len)
+    • lock_acquired   — lock obtained
+    • lock_blocked    — duplicate run prevented
+    • project_match   — always "openclaw" (Claude does routing)
+    • prompt_ready    — prompt file built (path, bytes)
+    • agent_start     — Claude invocation started
+    • agent_done      — Claude finished (exit_code, duration_ms, output)
+    • failure_detected — delegation failed
+    • failure_notified — error message sent to Discord
+    • delegate_exit   — final output returned (total_ms)
+
+journald (via discord-bot.py service):
+    • dispatch events (message receipt)
+    • delegate pid
+    • [project] [tool] / [assistant] lines from JSONL watcher
+    View: bot-logs
 
 Daily audit: route-audit (systemd timer, 8am PT)
-  Reads all three logs + session JSONLs, passes to Claude Opus for analysis
+  Reads delegate + timeline logs + bot journal health
+  Passes to agent-smart --model sonnet --continue
 ```
 
 ---
 
-## Source Control & Issue Tracking
+## Source Control
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│          github.com/pranavhj/openclaw-config (private)           │
-│          /home/pranav/openclaw-config/  (also in ~/projects/)    │
+│          github.com/pranavhj/openclaw-config (public)            │
+│          /home/pranav/projects/openclaw-config/                  │
 │                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │  AUTO-COMMIT (systemd path watcher)                       │    │
-│  │  openclaw-config-sync.path watches live files:            │    │
-│  │    AGENTS.md, all SKILL.md files, openclaw-CLAUDE.md,     │    │
-│  │    projects-CLAUDE.md, delegate, route-audit, openclaw.json│   │
-│  │                                                            │    │
-│  │  On any change → openclaw-config-sync.service runs:        │    │
-│  │    1. sync-from-live.sh (redacts secrets)                  │    │
-│  │    2. git add -A                                           │    │
-│  │    3. git commit "sync(misc): auto-commit..."              │    │
-│  │    4. git push                                             │    │
-│  └──────────────────────────────────────────────────────────┘    │
+│  AUTO-COMMIT (systemd path watcher)                              │
+│  openclaw-config-sync.path watches live files:                   │
+│    delegate, route-audit, discord-bot.py, discord-send,          │
+│    agent-smart, openclaw-CLAUDE.md, projects-CLAUDE.md,          │
+│    openclaw.json, SKILL.md files                                 │
 │                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │  ISSUE TRACKER  (issues/OC-NNN-*.md + ISSUES.md index)    │    │
-│  │  OC-001 (wontfix) retry.attempts=1 not applying           │    │
-│  │  OC-002 (open)    silent drop on full RPM exhaustion      │    │
-│  │  OC-003–OC-009    (fixed) various routing/config issues   │    │
-│  │  OC-010–OC-014    (fixed) Gemini behavioral issues        │    │
-│  │  OC-015 (fixed)   apostrophes break delegate exec         │    │
-│  │  OC-016 (fixed)   newlines break delegate exec            │    │
-│  └──────────────────────────────────────────────────────────┘    │
+│  On change → sync-from-live.sh + git add -A + commit + push      │
 │                                                                   │
 │  Secrets: openclaw.json stored with ${VAR} placeholders          │
-│  Credentials: token in ~/.git-credentials (not in remote URL)    │
 │  Pre-commit hook: blocks real secrets from being committed        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Config Files — What Lives Where
-
-```
-/home/pranav/.openclaw/
-├── openclaw.json                    ← GATEWAY CONFIG
-│   • API keys (Gemini, Groq, Ollama)
-│   • Agent model: gemini-2.5-flash (no fallbacks)
-│   • thinkingDefault: "off" (saves API quota)
-│   • Workspace: /home/pranav/.openclaw/workspace/
-│   • skills.allowBundled: ["__none__"] (disables all bundled)
-│   • Channel: discord only (retry=1)
-│   • allowFrom: user ID (allowlist)
-│   • Gateway port: 18789, auth token
-│   • Tools: coding profile, web search, exec security=full
-│   • Session idle reset: 5 minutes
-│
-├── workspace/
-│   ├── AGENTS.md                    ← PASSTHROUGH ROUTER (~15 lines)
-│   │   • Delegate EVERY message via delegate skill
-│   │   • Newline replacement instruction (OC-016)
-│   │   • After exec: STOP, no retries, no error handling
-│   │   • Exceptions: heartbeat, /quota, /gemini_requests
-│   │
-│   ├── SOUL.md                      ← # unused (stripped to save tokens)
-│   ├── IDENTITY.md                  ← # unused (stripped)
-│   ├── TOOLS.md                     ← # unused (stripped)
-│   ├── USER.md                      ← # unused (stripped)
-│   ├── HEARTBEAT.md                 ← Periodic task checklist (kept)
-│   │
-│   └── skills/                      ← WORKSPACE SKILLS ONLY
-│       ├── delegate/SKILL.md        ← HOW TO CALL DELEGATE
-│       │   • description embeds exec command + yieldMs:120000
-│       │   • Newline handling (OC-016), quoting rules (OC-015)
-│       │   • No retries, no further output after exec returns
-│       │
-│       ├── routing-audit/SKILL.md   ← HOW TO RUN TESTS / AUDIT LOGS
-│       ├── discord-send/SKILL.md    ← PROACTIVE DISCORD MESSAGES
-│       ├── quota/SKILL.md           ← /quota COMMAND
-│       └── gemini-requests/SKILL.md ← /gemini_requests COMMAND
-│
-└── agents/
-    └── main/
-        └── sessions/                ← GEMINI SESSION STORE
-            ├── sessions.json        ← session index
-            └── *.jsonl              ← session history
-
-/home/pranav/
-├── CLAUDE.md                        ← DIRECT TERMINAL CLAUDE CONFIG
-│   • openclaw agent instructions, user profile, response format
-│   • Workspace paths, project detection, project mode
-│   • NOT read by openclaw-mediated calls
-│
-├── projects/
-│   ├── CLAUDE.md                    ← PROJECT SUB-SESSION OVERRIDE
-│   │   • "You're in a project dir — do the work, don't spawn sub-sessions"
-│   │   • Prevents recursion when openclaw_claude spawns sub-sessions
-│   │
-│   ├── openclaw/
-│   │   └── CLAUDE.md               ← OPENCLAW_CLAUDE CONFIG
-│   │       • Job: do work, send via openclaw, output SENT
-│   │       • User profile, Discord format, -# sent by claude watermark
-│   │       • Project routing (one-off vs spawn sub-session)
-│   │       • Source control workflow (sync + commit with OC-NNN)
-│   │       • openclaw system knowledge + failure patterns
-│   │
-│   ├── openclaw-config -> /home/pranav/openclaw-config   ← SYMLINK
-│   │
-│   └── <user-projects>/             ← Actual project work
-│       ├── PROGRESS.md              ← State bookmark (Claude maintains)
-│       └── <source files>
-│
-└── .local/bin/
-    ├── delegate                     ← DELEGATION ORCHESTRATOR
-    │   • Sanitize, lock, log, build prompt, invoke Claude
-    │   • Failure notification to Discord
-    │   • Dual logging: human-readable + JSON timeline
-    │
-    ├── run-tests                    ← FULL TEST SUITE RUNNER
-    │   • SKIP_GATEWAY_RESTART=1
-    │   • Runs all 3 suites, sends Discord summary
-    │
-    └── route-audit                  ← DAILY LOG ANALYSIS
-        • Gathers delegate + timeline + gateway logs + session JSONLs
-        • cd projects/openclaw && agent --continue --model claude-opus-4-6
-        • Claude analyzes routing health, sends report to Discord
-
-/home/pranav/openclaw-config/        ← SOURCE CONTROL REPO
-    config/openclaw.json             ← sanitized (secrets as ${VAR})
-    workspace/AGENTS.md
-    workspace/skills/*/SKILL.md
-    agents/openclaw-CLAUDE.md
-    agents/projects-CLAUDE.md
-    bin/delegate, route-audit, run-tests
-    issues/OC-NNN-*.md
-    scripts/sync-from-live.sh        ← copies live → repo + redacts secrets
-    scripts/sync-to-live.sh          ← deploys repo → live paths
-    docs/openclaw-architecture.md    ← this file
-
-/home/pranav/.config/systemd/user/
-    openclaw-config-sync.path        ← watches live config files
-    openclaw-config-sync.service     ← auto-sync + commit + push on change
-```
-
----
-
-## Agent Responsibilities
-
-| Agent | Model | Working Dir | Config | Responsibility |
-|---|---|---|---|---|
-| **Gemini** (agent:main) | gemini-2.5-flash | `.openclaw/workspace/` | AGENTS.md | Passthrough router: exec delegate for every message. No thinking, no classification, no retries. |
-| **openclaw_claude** | claude-sonnet-4-6 | `projects/openclaw/` | `projects/openclaw/CLAUDE.md` | Entry point for all channel traffic. One-off: handles directly. Project work: spawns isolated sub-session in project dir. |
-| **Project sub-session** | claude-sonnet-4-6 | `projects/<slug>/` | `projects/CLAUDE.md` + `CLAUDE.md` | Isolated per-project Claude session. Reads PROGRESS.md, does work, updates PROGRESS.md, sends to Discord, exits. |
-| **Claude Code** (terminal) | claude-opus-4-6 | `/home/pranav/` | `CLAUDE.md` | Direct dev work with Pranav in terminal |
-
----
-
-## Skill Responsibilities
-
-| Skill | Trigger | Action | Who Runs |
-|---|---|---|---|
-| **delegate** | Every message (default) | `exec(delegate <ch> <tgt> <msg>, yieldMs:120000)` | Gemini |
-| **routing-audit** | "run tests", "check routing" | `exec(run-tests)` or `exec(route-audit)` | Gemini directly |
-| **discord-send** | Proactive notifications | `exec(openclaw message send ...)` | Gemini |
-| **quota** | `/quota` | `exec(python3 gemini_counter.py status)` | Gemini exec-dispatch |
-| **gemini-requests** | `/gemini_requests` | `exec(/gemini_requests gq)` | Gemini exec-dispatch |
-
----
-
-## Token Optimization
-
-Per-request token breakdown (before → after passthrough rewrite):
-
-| Source | Before | After |
-|---|---|---|
-| AGENTS.md | ~2,300 | ~200 (passthrough, 15 lines) |
-| SOUL/IDENTITY/TOOLS/USER.md | ~2,000 | ~40 (all `# unused`) |
-| 55 bundled skill definitions | ~2,500 | 0 (disabled) |
-| Gemini thinking overhead | ~500-1000 | 0 (thinkingDefault: off) |
-| **Total per request** | **~7,300** | **~300** |
-
----
-
 ## Key Design Decisions & Why
 
-**Passthrough router (no Mode 1/Mode 2)**
-Gemini was unreliably classifying messages. Removing classification means every message gets one exec call — simpler, more reliable, fewer API calls.
+**discord-bot.py replaces openclaw gateway + Gemini**
+Gemini was unreliably classifying messages, occasionally bypassing delegation, and consuming API quota as a passthrough router. The Python discord.py service is simpler: receive DM → spawn delegate → done. No AI in the hot path.
 
-**`thinkingDefault: "off"`**
-Gemini's thinking budget was wasted on a passthrough router. Saves tokens and latency.
+**`start_new_session=True` on Popen**
+Detaches delegate from the discord-bot.py process group. If the service restarts (e.g., from a path watcher auto-reload), running delegates survive and complete normally.
 
-**Workspace files stripped to `# unused`**
-SOUL.md, IDENTITY.md, TOOLS.md, USER.md are irrelevant for a router. Stripping saves ~2KB per turn.
+**`KillMode=process` in systemd unit**
+Prevents systemd from killing the entire cgroup on service stop. Combined with `start_new_session=True`, delegate processes are fully isolated.
 
-**No fallback models**
-Groq models can't use exec tool (skills are Gemini-specific). Fallbacks just waste API calls. If Gemini is down, delegation simply fails and the delegate script notifies via Discord.
+**agent-smart auto-compaction (400KB threshold, 5 pairs)**
+Claude Code JSONL sessions grow unboundedly. At 400KB the context window starts filling up. Compaction keeps the last 5 user/assistant exchanges as history context, drops tool call metadata. Triggers before each agent invocation.
 
-**`yieldMs: 120000` on delegate exec**
-Default is 10s which backgrounds the command before Claude responds. 2 min gives Claude time to complete.
+**Always delegate to openclaw project dir**
+No bash pre-filter layer. Claude handles routing via CLAUDE.md instructions. Simpler code, same result.
 
-**`allowBundled: ["__none__"]` (not `[]`)**
-Empty allowlist means "allow all" in openclaw's logic. A non-empty list with no matching names disables all 55 bundled skills.
+**`--model sonnet` everywhere**
+Sonnet (claude-sonnet-4-6) handles all delegations and route-audit. Opus reserved only if explicitly needed.
 
-**`--continue` on delegate, and per-project sub-sessions**
-openclaw_claude accumulates session history for diagnostics. Project work gets isolated `--continue` sessions in their own dirs — each project's Claude has full conversation history without cross-project contamination.
+**session-reset after each delegation**
+Clears the openclaw_claude session after each completed delegation. Prevents cross-request context contamination and keeps token usage low.
+
+**discord-send uses REST API directly**
+`curl POST` to Discord v10. No gateway dependency. Simple, reliable, no external process dependencies.
 
 **`projects/CLAUDE.md` as recursion guard**
-Sub-sessions spawned in `projects/<slug>/` walk up to `projects/CLAUDE.md` before reaching `/home/pranav/CLAUDE.md`. This file says "you're in a project dir, just do the work" — preventing recursive sub-session spawning.
-
-**Lock file on delegate**
-Gemini sometimes double-fires execs. The `mkdir` lock (atomic) ensures only one Claude invocation runs at a time; second caller gets SENT immediately.
-
-**Skill description embeds the exec command**
-Gemini was hallucinating wrong SKILL.md paths (ENOENT). Embedding the command in the frontmatter `description` means Gemini never needs to read the file.
-
-**Dual logging (human + timeline JSON)**
-Human-readable log for quick debugging, JSON timeline for machine parsing by route-audit. Every step is timestamped in UTC.
-
-**Failure notification to Discord**
-When delegation fails, delegate script sends an error message to Discord so the user isn't left waiting in silence. Then returns "SENT" to Gemini so it stops.
-
-**Message sanitization (OC-015, OC-016)**
-Apostrophes → U+2019, backticks → U+2018, newlines → spaces. Prevents shell parse errors that silently dropped messages.
+Sub-sessions in `projects/<slug>/` walk up to `projects/CLAUDE.md` before reaching `/home/pranav/CLAUDE.md`. Says "you're in a project dir, just do the work" — prevents recursive sub-session spawning.
 
 ---
 
 ## Known Risks
 
-### OC-002 — Silent message drop on full RPM exhaustion (HIGH)
-When Gemini hits per-minute rate limits, the message may be silently dropped. No Discord notification at the gateway level.
-**Workaround:** wait 2+ minutes after heavy usage before sending real messages.
-
-### Gemini bypasses AGENTS.md and answers directly (HIGH)
-Gemini sometimes ignores passthrough instructions and answers via web_search or direct text. This is a fundamental LLM reliability issue — instructions are probabilistic, not guaranteed.
-**Mitigation:** Instructions reinforced in 3 places (AGENTS.md, SKILL.md description, SKILL.md body). Daily route-audit flags violations.
-
-### Gemini tampers with workspace config files (HIGH) — OC-017
-Gemini has write access to the workspace and can overwrite AGENTS.md or SKILL.md using the `write` tool. Observed 2026-03-23: Gemini replaced AGENTS.md with "Process user requests directly. Do not delegate unless explicitly instructed."
-**Mitigation:** Test 27 (unit) checks AGENTS.md content for anti-delegation overrides. Integration Test 3b and `session_used_write_on_config()` detect write tool calls in Gemini sessions. route-audit flags this as CRITICAL. No way to fully prevent — Gemini has workspace write access by design.
-
-### Claude creates rogue Gemini skills for user features (HIGH) — OC-018
-When tasked with a feature that involves system integration (e.g., Alexa client), Claude may create a Gemini skill + exec binary in `~/.local/bin/`, bypassing delegation entirely for future requests of that type.
-**Mitigation:** "NEVER do these" guard in `projects/openclaw/CLAUDE.md` explicitly prohibits creating workspace skills or exec binaries for features. Tests 25/26 (unit) and Test 3b (integration) enforce the skill and binary allowlists. Allowed skills: delegate, discord-send, quota, gemini-requests, routing-audit.
-
-### Background exec ("Command still running") (MEDIUM)
-Gemini occasionally runs exec in background despite `yieldMs: 120000`. Returns "Command still running" before Claude finishes.
-**Mitigation:** delegate script still completes in background; Claude delivers to Discord. But Gemini may do an extra turn.
-
-### `--continue` session context growth (MEDIUM)
-openclaw_claude accumulates session history across all conversations. Over weeks the context window fills up.
-**Mitigation:** openclaw compaction mode set to "safeguard".
+### OC-002 — Silent message drop on full RPM exhaustion (OPEN)
+If Discord bot or Claude Code hits rate limits, the message may be silently dropped.
+**Workaround:** wait 2+ minutes after heavy usage.
 
 ### Delegate lock drops parallel requests (LOW-MEDIUM)
-If two messages arrive simultaneously, the second is dropped (returns SENT without delegating). Intentional for duplicate prevention, but legitimate parallel requests lose the second message.
+If two messages arrive simultaneously, the second gets a "still working" notification and is dropped. Intentional for duplicate prevention, but legitimate parallel requests lose the second.
+
+### `--continue` session context growth (MEDIUM — mitigated)
+openclaw_claude accumulates session history. agent-smart compaction triggers at 400KB to cap growth.
 
 ### Prompt injection via message content (MEDIUM)
-User message is passed verbatim into Claude's prompt. A crafted message could attempt to override instructions.
+User message is passed verbatim into Claude's prompt.
 
-### Gateway restart kills active sessions (LOW — mitigated)
-`systemctl --user restart openclaw-gateway` SIGTERMs any active delegate call.
-**Mitigation:** `SKIP_GATEWAY_RESTART=1` in run-tests.
+### Service restart race (LOW — mitigated)
+KillMode=process + start_new_session=True mean delegate survives discord-bot.py restarts. But a machine reboot mid-delegation would still kill in-flight work.
 
 ---
 
@@ -480,11 +362,11 @@ User message is passed verbatim into Claude's prompt. A crafted message could at
 
 | Suite | File | Scope |
 |---|---|---|
-| Unit tests | `/home/pranav/test_delegate.sh` | Delegate script: lock, logging, sanitization, config validation, timeline events, failure notification, skill allowlist (OC-018), binary allowlist (OC-018), AGENTS.md integrity (OC-017) |
-| Integration tests | `/home/pranav/test_integration.sh` | End-to-end: live delegation, Gemini session analysis (incl. write/non-exec tool detection), workspace integrity (Test 3b), cron jobs, config consistency |
+| Unit tests | `/home/pranav/test_delegate.sh` | Delegate script: lock, logging, sanitization, config validation, timeline events, failure notification |
+| Integration tests | `/home/pranav/test_integration.sh` | End-to-end: live delegation, workspace integrity |
 | Behavior tests | `/home/pranav/test_claude_behavior.sh` | Claude response quality: multi-line, special chars, watermark, format |
 | Runner | `/home/pranav/.local/bin/run-tests` | Runs all 3 suites, sends Discord summary |
-| Daily audit | `/home/pranav/.local/bin/route-audit` | Log analysis via Claude Opus: routing health, red flags (config tampering, rogue skills/binaries, background exec), workspace integrity snapshot |
+| Daily audit | `/home/pranav/.local/bin/route-audit` | Log analysis via Claude Sonnet: routing health, failure patterns, bot health |
 
 ---
 
@@ -493,4 +375,3 @@ User message is passed verbatim into Claude's prompt. A crafted message could at
 | Job | Schedule | Mechanism | Script |
 |---|---|---|---|
 | route-audit | 8am PT daily | systemd timer | `/home/pranav/.local/bin/route-audit` |
-| gemini-stats | daily | native crontab | `/home/pranav/.local/bin/send-gemini-stats` |

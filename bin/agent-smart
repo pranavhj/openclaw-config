@@ -1,0 +1,45 @@
+#!/bin/bash
+# Wrapper around agent --continue that auto-compacts large session files.
+# When session exceeds THRESHOLD_KB, creates a new session keeping the last
+# KEEP_PAIRS user/assistant exchanges as context.
+
+THRESHOLD_KB=400
+KEEP_PAIRS=5
+
+# Derive session directory from cwd (mirrors how Claude Code maps dirs to project slugs)
+CWD_KEY=$(pwd | sed 's|/|-|g')
+SESSION_DIR="$HOME/.claude/projects/$CWD_KEY"
+
+if [[ -d "$SESSION_DIR" ]]; then
+    CURRENT=$(ls -t "$SESSION_DIR"/*.jsonl 2>/dev/null | head -1)
+    if [[ -n "$CURRENT" ]]; then
+        SIZE_KB=$(( $(stat -c%s "$CURRENT") / 1024 ))
+        if [[ $SIZE_KB -gt $THRESHOLD_KB ]]; then
+            echo "[agent-smart] session ${SIZE_KB}KB > ${THRESHOLD_KB}KB — compacting, keeping last $KEEP_PAIRS pairs"
+            python3 - "$CURRENT" "$SESSION_DIR" "$KEEP_PAIRS" << 'PYEOF'
+import json, os, sys, uuid
+
+src = sys.argv[1]
+dst_dir = sys.argv[2]
+keep_n = int(sys.argv[3]) * 2  # pairs → individual entries
+
+lines = open(src).readlines()
+
+# Keep only user/assistant entries (conversation history)
+msg_entries = [l for l in lines if json.loads(l.strip()).get('type') in ('user', 'assistant')]
+
+kept = msg_entries[-keep_n:]
+
+dst = os.path.join(dst_dir, f'{uuid.uuid4()}.jsonl')
+with open(dst, 'w') as f:
+    for line in kept:
+        f.write(line)
+
+os.remove(src)
+print(f"[agent-smart] {len(lines)} lines → {len(kept)} lines ({os.path.getsize(dst)} bytes)")
+PYEOF
+        fi
+    fi
+fi
+
+exec agent "$@"

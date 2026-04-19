@@ -14,6 +14,10 @@ cp /home/pranav/projects/openclaw/CLAUDE.md                              "$REPO/
 cp /home/pranav/projects/CLAUDE.md                                       "$REPO/agents/projects-CLAUDE.md"
 cp /home/pranav/.local/bin/delegate                                      "$REPO/bin/delegate"
 cp /home/pranav/.local/bin/route-audit                                   "$REPO/bin/route-audit"
+cp /home/pranav/.local/bin/discord-bot.py                               "$REPO/bin/discord-bot.py"
+cp /home/pranav/.local/bin/discord-send                                  "$REPO/bin/discord-send"
+cp /home/pranav/.local/bin/agent-smart                                   "$REPO/bin/agent-smart"
+cp /home/pranav/.local/bin/bot-logs                                      "$REPO/bin/bot-logs"
 [ -f /home/pranav/.local/bin/run-tests ] && \
   cp /home/pranav/.local/bin/run-tests                                   "$REPO/bin/run-tests"
 
