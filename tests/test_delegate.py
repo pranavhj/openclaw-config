@@ -341,11 +341,64 @@ print('\n20. agent-smart.py shell=True on Windows')
 agent_src = src('agent-smart.py')
 (p if "shell = sys.platform == 'win32'" in agent_src else f)(
     "shell=True conditional on sys.platform == 'win32'")
-(p if "['claude'] + sys.argv[1:]" in agent_src else f)(
-    "claude called with sys.argv[1:] passthrough")
+(p if "['claude'] + args" in agent_src else f)(
+    "claude called with args passthrough")
 (p if 'maybe_compact' in agent_src else f)('maybe_compact function present')
 (p if 'THRESHOLD_KB' in agent_src and 'KEEP_PAIRS' in agent_src else f)(
     'THRESHOLD_KB and KEEP_PAIRS constants present')
+
+# ── 21. CLAUDECODE env var stripped before spawning agent (Windows nested-session fix) ──
+print('\n21. CLAUDECODE stripped before agent spawn')
+
+(p if "CLAUDECODE" in delegate_src else f)('CLAUDECODE referenced in delegate.py')
+(p if "k != 'CLAUDECODE'" in delegate_src else f)(
+    "CLAUDECODE stripped from agent_env (prevents nested-session error)")
+
+# ── 22. route-audit.py uses --print-file not --print (Windows newline fix) ────
+print('\n22. route-audit.py uses --print-file (OC-016 equivalent)')
+
+route_src = src('route-audit.py')
+(p if '--print-file' in route_src else f)(
+    'route-audit.py uses --print-file (not bare --print)')
+(p if "'--print', prompt" not in route_src and '"--print", prompt' not in route_src else f)(
+    'route-audit.py does not pass multi-line prompt via --print')
+(p if 'prompt_file' in route_src and 'write_text' in route_src else f)(
+    'route-audit.py writes prompt to temp file')
+
+# ── 23. agent-smart.py supports --print-file flag ─────────────────────────────
+print('\n23. agent-smart.py supports --print-file')
+
+(p if '--print-file' in agent_src else f)('agent-smart.py handles --print-file arg')
+(p if 'read_text' in agent_src and 'prompt_file' in agent_src else f)(
+    'agent-smart.py reads prompt from file')
+
+# ── 24. Sub-session spawn in CLAUDE.md uses unset CLAUDECODE ──────────────────
+print('\n24. Sub-session spawn unsets CLAUDECODE')
+
+try:
+    claude_md = (AGENTS_DIR / 'openclaw-CLAUDE.md').read_text(encoding='utf-8')
+    (p if 'unset CLAUDECODE' in claude_md else f)(
+        'openclaw-CLAUDE.md: sub-session spawn unsets CLAUDECODE')
+    # Must appear in context of the spawn command (before claude --continue)
+    unsetter_idx = claude_md.find('unset CLAUDECODE')
+    continue_idx = claude_md.find('claude --continue', unsetter_idx)
+    (p if unsetter_idx >= 0 and continue_idx > unsetter_idx else f)(
+        'unset CLAUDECODE appears before claude --continue in spawn command')
+except Exception as e:
+    f(f'CLAUDE.md read error: {e}')
+
+# ── 25. projects/CLAUDE.md recursion guard ────────────────────────────────────
+print('\n25. projects/CLAUDE.md recursion guard')
+
+projects_claude = Path.home() / 'projects' / 'CLAUDE.md'
+(p if projects_claude.exists() else f)(
+    f'projects/CLAUDE.md exists at {projects_claude}' if projects_claude.exists()
+    else f'MISSING: {projects_claude} (sub-sessions lack recursion guard)'
+)
+if projects_claude.exists():
+    content = projects_claude.read_text(encoding='utf-8', errors='replace')
+    (p if 'do NOT' in content or 'do not' in content.lower() else f)(
+        'projects/CLAUDE.md instructs sub-sessions not to spawn further sub-sessions')
 
 # ── Summary ────────────────────────────────────────────────────────────────────
 print()

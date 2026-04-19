@@ -310,6 +310,34 @@ if DELEGATE_PY.exists():
 
 print()
 
+# ── 6. Recursion guard and sub-session isolation ──────────────────────────────
+print('6. Sub-session isolation')
+
+# projects/CLAUDE.md recursion guard must be deployed
+projects_claude = Path.home() / 'projects' / 'CLAUDE.md'
+(p if projects_claude.exists() else f)(
+    f'projects/CLAUDE.md recursion guard deployed' if projects_claude.exists()
+    else f'MISSING: {projects_claude} — sub-sessions will recurse indefinitely'
+)
+
+# projects/openclaw/CLAUDE.md must exist
+openclaw_claude = Path.home() / 'projects' / 'openclaw' / 'CLAUDE.md'
+(p if openclaw_claude.exists() else f)(
+    f'projects/openclaw/CLAUDE.md deployed' if openclaw_claude.exists()
+    else f'MISSING: {openclaw_claude}'
+)
+
+# Both CLAUDE.md files must have no Linux /home/pranav paths
+for label, path in [('projects/CLAUDE.md', projects_claude),
+                     ('projects/openclaw/CLAUDE.md', openclaw_claude)]:
+    if path.exists():
+        content = path.read_text(encoding='utf-8', errors='replace')
+        (p if '/home/pranav' not in content else f)(
+            f'{label}: no stale Linux paths'
+        )
+
+print()
+
 # ── Summary ────────────────────────────────────────────────────────────────────
 print()
 print('==========================================')

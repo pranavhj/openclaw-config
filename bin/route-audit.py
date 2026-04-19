@@ -6,12 +6,16 @@ via Claude, and sends a summary to Discord.
 
 Usage: python route-audit.py [YYYY-MM-DD]   # defaults to yesterday
 """
+import io
 import os
 import subprocess
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 SCRIPT_DIR = Path(__file__).parent
 AGENT_SMART_PY = SCRIPT_DIR / 'agent-smart.py'
@@ -108,12 +112,21 @@ Dispatch events in log: {bot_dispatches}
 {timeline_log}"""
 
     WORK_DIR.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        [sys.executable, str(AGENT_SMART_PY),
-         '--continue', '--permission-mode', 'bypassPermissions',
-         '--model', 'sonnet', '--print', prompt],
-        cwd=str(WORK_DIR),
-    )
+    # Write prompt to file — avoids cmd.exe newline-splitting on Windows
+    prompt_file = Path(tempfile.gettempdir()) / f'route-audit-prompt-{date}.txt'
+    prompt_file.write_text(prompt, encoding='utf-8')
+    try:
+        result = subprocess.run(
+            [sys.executable, str(AGENT_SMART_PY),
+             '--continue', '--permission-mode', 'bypassPermissions',
+             '--model', 'sonnet', '--print-file', str(prompt_file)],
+            cwd=str(WORK_DIR),
+        )
+    finally:
+        try:
+            prompt_file.unlink(missing_ok=True)
+        except Exception:
+            pass
     sys.exit(result.returncode)
 
 
