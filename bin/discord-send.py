@@ -4,12 +4,16 @@
 Usage: python discord-send.py --target CHANNEL_ID --message "text"
 """
 import argparse
+import io
 import json
 import os
 import sys
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 CONFIG_PATH = Path.home() / '.openclaw' / 'openclaw.json'
 
@@ -41,6 +45,7 @@ def main():
         headers={
             'Authorization': f'Bot {token}',
             'Content-Type': 'application/json',
+            'User-Agent': 'DiscordBot (https://github.com/pranavhj/openclaw-config, 1.0)',
         },
         method='POST',
     )

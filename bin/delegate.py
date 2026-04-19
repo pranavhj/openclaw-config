@@ -6,6 +6,7 @@ Usage: python delegate.py CHANNEL TARGET MESSAGE...
   TARGET   — Discord channel ID to reply to
   MESSAGE  — message text (remaining args joined with spaces)
 """
+import io
 import json
 import os
 import subprocess
@@ -14,6 +15,9 @@ import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 SCRIPT_DIR = Path(__file__).parent
 AGENT_SMART_PY = SCRIPT_DIR / 'agent-smart.py'
@@ -203,16 +207,29 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     tl({'ts': ts_agent_start, 'event': 'agent_start', 'channel': channel, 'target': target})
 
     WORK_DIR.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        [sys.executable, str(AGENT_SMART_PY),
-         '--continue', '--permission-mode', 'bypassPermissions',
-         '--model', 'sonnet', '--print', prompt],
-        cwd=str(WORK_DIR),
-        capture_output=True,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-    )
+    agent_env = {k: v for k, v in os.environ.items() if k != 'CLAUDECODE'}
+
+    # Write prompt to a temp file — avoids cmd.exe newline-splitting when
+    # passing multi-line strings via shell=True on Windows.
+    prompt_file = LOGDIR / f'delegate-prompt-{ts_recv.replace(":", "-").replace(".", "-")}.txt'
+    prompt_file.write_text(prompt, encoding='utf-8')
+    try:
+        result = subprocess.run(
+            [sys.executable, str(AGENT_SMART_PY),
+             '--continue', '--permission-mode', 'bypassPermissions',
+             '--model', 'sonnet', '--print-file', str(prompt_file)],
+            cwd=str(WORK_DIR),
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            env=agent_env,
+        )
+    finally:
+        try:
+            prompt_file.unlink(missing_ok=True)
+        except Exception:
+            pass
     exit_code = result.returncode
     output = (result.stdout or '') + (result.stderr or '')
     duration_ms = int((time.monotonic() - t_agent) * 1000)

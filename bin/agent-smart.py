@@ -79,10 +79,34 @@ def main():
     session_dir = Path.home() / '.claude' / 'projects' / cwd_key
     maybe_compact(session_dir)
 
+    # --print-file <path>: read prompt from file and pass via --print.
+    # Used by delegate.py on Windows to avoid cmd.exe newline-splitting
+    # when multi-line prompts are passed as a command-line argument.
+    args = sys.argv[1:]
+    if '--print-file' in args:
+        idx = args.index('--print-file')
+        prompt_file = args[idx + 1]
+        args = args[:idx] + args[idx + 2:]  # remove --print-file <path>
+        prompt = Path(prompt_file).read_text(encoding='utf-8')
+        # Re-insert as --print with the file contents — but since shell=True
+        # on Windows still has the newline problem, write it via stdin instead.
+        # claude supports reading stdin when invoked with --print "-" or piped input.
+        # We pass it via stdin with --print flag omitted, relying on stdin pipe.
+        claude_args = ['claude'] + args
+        shell = sys.platform == 'win32'
+        result = subprocess.run(
+            claude_args,
+            input=prompt,
+            text=True,
+            encoding='utf-8',
+            shell=shell,
+        )
+        sys.exit(result.returncode)
+
     # On Windows, claude is a .cmd file that requires cmd.exe to execute.
     # shell=True lets Python invoke it through cmd.exe automatically.
     shell = sys.platform == 'win32'
-    result = subprocess.run(['claude'] + sys.argv[1:], shell=shell)
+    result = subprocess.run(['claude'] + args, shell=shell)
     sys.exit(result.returncode)
 
 
