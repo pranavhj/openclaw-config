@@ -74,6 +74,16 @@ print('==========================================')
 print()
 
 # ── Pre-flight ───────────────────────────────────────────────────────────────
+print('Pre-flight: environment checks...')
+import shutil
+claude_path = shutil.which('claude')
+if claude_path:
+    print(f'  claude found: {claude_path}')
+else:
+    print('  WARNING: claude not found in PATH — service will fail!')
+    print('  Fix: add claude dir to NSSM AppEnvironmentExtra PATH')
+print()
+
 print('Pre-flight: NSSM / discord-bot service check...')
 try:
     sc = subprocess.run(
@@ -88,6 +98,17 @@ try:
         print('  WARNING: discord-bot status unknown (not installed?)')
 except Exception:
     print('  WARNING: could not query discord-bot service (sc not available or service not installed)')
+print()
+
+# ── 0. claude in PATH ─────────────────────────────────────────────────────────
+print('0. claude binary in PATH')
+
+import shutil as _shutil
+_claude = _shutil.which('claude')
+(p if _claude else f)(
+    f'claude found in PATH: {_claude}' if _claude
+    else 'claude NOT in PATH — NSSM service will fail with exit 1'
+)
 print()
 
 # ── 1. Delegate end-to-end ────────────────────────────────────────────────────
