@@ -1,0 +1,115 @@
+#Requires -RunAsAdministrator
+<#
+.SYNOPSIS
+    Manage the openclaw discord-bot NSSM service.
+
+.DESCRIPTION
+    Configures and controls the discord-bot Windows service via NSSM.
+    Must be run as Administrator.
+
+.PARAMETER Action
+    What to do: install | start | stop | restart | status | uninstall
+    Default: restart
+
+.EXAMPLE
+    .\manage-service.ps1              # restart (default)
+    .\manage-service.ps1 install      # install + start fresh
+    .\manage-service.ps1 status       # show current status
+    .\manage-service.ps1 stop         # stop only
+    .\manage-service.ps1 restart      # apply env changes + restart
+#>
+
+param(
+    [ValidateSet('install','start','stop','restart','status','uninstall')]
+    [string]$Action = 'restart'
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# ── Paths ──────────────────────────────────────────────────────────────────────
+$Nssm        = "C:\Users\prana\bin\nssm.exe"
+$Python      = "C:\Python310\python.exe"
+$BotScript   = "D:\MyData\Software\openclaw-config\bin\discord-bot.py"
+$LogDir      = "C:\Users\prana\AppData\Local\openclaw"
+$LogFile     = "$LogDir\bot.log"
+$ServiceName = "discord-bot"
+
+$ClaudeDir   = "C:\Users\prana\AppData\Local\Microsoft\WinGet\Packages\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe"
+$ExtraEnv    = "USERPROFILE=C:\Users\prana HOMEPATH=\Users\prana HOMEDRIVE=C: LOCALAPPDATA=C:\Users\prana\AppData\Local PATH=$ClaudeDir;C:\Python310;C:\Windows\System32;C:\Windows"
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+function Nssm { & $Nssm @args }
+
+function Apply-Config {
+    Write-Host "Configuring $ServiceName..."
+    Nssm set $ServiceName Application      $Python
+    Nssm set $ServiceName AppParameters    $BotScript
+    Nssm set $ServiceName AppDirectory     "C:\Users\prana"
+    Nssm set $ServiceName AppStdout        $LogFile
+    Nssm set $ServiceName AppStderr        $LogFile
+    Nssm set $ServiceName AppRotateFiles   1
+    Nssm set $ServiceName AppRotateOnline  1
+    Nssm set $ServiceName AppRotateBytes   5000000
+    Nssm set $ServiceName AppEnvironmentExtra $ExtraEnv
+    Nssm set $ServiceName Start            SERVICE_AUTO_START
+    Write-Host "Config applied."
+}
+
+function Show-Status {
+    Write-Host ""
+    Write-Host "=== Service status ==="
+    Nssm status $ServiceName
+    Write-Host ""
+    Write-Host "=== Last 10 log lines ==="
+    if (Test-Path $LogFile) {
+        Get-Content $LogFile -Tail 10
+    } else {
+        Write-Host "(no log file yet)"
+    }
+}
+
+# ── Actions ────────────────────────────────────────────────────────────────────
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+switch ($Action) {
+
+    'install' {
+        Write-Host "Installing $ServiceName..."
+        Nssm install $ServiceName $Python $BotScript
+        Apply-Config
+        Nssm start $ServiceName
+        Write-Host "Installed and started."
+        Show-Status
+    }
+
+    'start' {
+        Nssm start $ServiceName
+        Write-Host "Started."
+        Show-Status
+    }
+
+    'stop' {
+        Nssm stop $ServiceName
+        Write-Host "Stopped."
+    }
+
+    'restart' {
+        Write-Host "Applying config and restarting $ServiceName..."
+        Apply-Config
+        Nssm restart $ServiceName
+        Write-Host "Restarted."
+        Show-Status
+    }
+
+    'status' {
+        Show-Status
+    }
+
+    'uninstall' {
+        Write-Host "Stopping and removing $ServiceName..."
+        Nssm stop  $ServiceName
+        Nssm remove $ServiceName confirm
+        Write-Host "Uninstalled."
+    }
+}
