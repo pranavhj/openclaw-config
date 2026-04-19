@@ -143,6 +143,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         Path.home() / 'AndroidStudioProjects',
         Path.home() / 'PycharmProjects',
         Path.home() / 'UnityProjects',
+        Path('D:/MyData/Software'),
     ]
     projects = []  # list of (name, full_path)
     for root in PROJECT_ROOTS:

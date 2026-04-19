@@ -58,14 +58,14 @@ Your prompt includes a `## Known projects` section. Use it to decide how to hand
 3. Spawn an isolated project sub-session and let it handle delivery:
 
 ```
-cd <full_path> && claude --continue --permission-mode bypassPermissions --print "## Reply
+(unset CLAUDECODE; cd <full_path> && claude --continue --permission-mode bypassPermissions --print "## Reply
 Target: <target>
 
 ## Recent messages
 <pass through the ## Recent messages section from your own prompt>
 
 ## Request
-<user's full message verbatim>"
+<user's full message verbatim>")
 ```
 
 4. Output: SENT
