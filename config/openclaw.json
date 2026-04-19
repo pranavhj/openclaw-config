@@ -30,7 +30,7 @@
           "alias": "gemini_requests"
         }
       },
-      "workspace": "/home/pranav/.openclaw/workspace",
+      "workspace": "C:\\Users\\prana\\.openclaw\\workspace",
       "compaction": {
         "mode": "safeguard"
       }

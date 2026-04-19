@@ -26,3 +26,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-018](issues/OC-018-claude-created-rogue-gemini-skill.md) | bug | fixed | Claude created rogue Alexa skill in Gemini workspace + alexa-send binary in ~/.local/bin | `fix(OC-018)` |
 | [OC-019](issues/OC-019-gemini-handled-requests-directly-bypassing-delegation.md) | bug | fixed | Gemini used write tool and replied directly when exec-completed + new user message arrived in same turn | `fix(OC-019)` |
 | [OC-020](issues/OC-020-repo-out-of-sync-after-gateway-migration.md) | config | fixed | Repo out of sync after Gemini→discord-bot.py migration: missing bin scripts + stale architecture doc | `docs(OC-020)` |
+| [OC-021](issues/OC-021-windows-migration.md) | feature | fixed | Migrate openclaw pipeline to Windows — rewrite all bash scripts to Python, eliminate VM dependency | `feat(OC-021)` |

@@ -15,11 +15,12 @@ import sys
 import json
 import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 DATE = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-LOGDIR = Path("/tmp/openclaw")
+LOGDIR = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'openclaw'
 SESSIONS_DIR = Path.home() / ".openclaw/agents/main/sessions"
 
 # Parse args

@@ -2,10 +2,15 @@
 import discord
 import subprocess
 import os
+import sys
 import json
 import logging
 import asyncio
 import glob
+import tempfile
+from pathlib import Path
+
+DELEGATE_PY = Path(__file__).parent / 'delegate.py'
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,9 +30,15 @@ def project_label(filepath):
     """Extract a short project name from a JSONL path."""
     dirname = os.path.basename(os.path.dirname(filepath))
     # e.g. -home-pranav-projects-screen-reader → screen-reader
+    # Linux: -home-pranav-projects-<slug>
     for prefix in ['-home-pranav-projects-', '-home-pranav-']:
         if dirname.startswith(prefix):
             return dirname[len(prefix):]
+    # Windows: C--Users-prana-projects-<slug>
+    import re
+    m = re.search(r'-projects-(.+)$', dirname)
+    if m:
+        return m.group(1)
     return dirname
 
 def format_entry(entry, project):
@@ -149,29 +160,37 @@ async def on_message(message):
         return
 
     content = message.content.replace('\n', ' ')
-    env = {**os.environ, 'PATH': '/home/pranav/.local/bin:/usr/local/bin:/usr/bin:/bin'}
+    env = None  # inherit environment; claude is already in PATH
 
     # Download attachments if any
     attach_count = 0
     if message.attachments:
-        attach_dir = f'/tmp/openclaw/attachments/{message.id}'
-        os.makedirs(attach_dir, exist_ok=True)
+        attach_dir = Path(tempfile.gettempdir()) / 'openclaw' / 'attachments' / str(message.id)
+        attach_dir.mkdir(parents=True, exist_ok=True)
         paths = []
         for att in message.attachments:
-            dest = os.path.join(attach_dir, att.filename)
-            await att.save(dest)
-            paths.append(dest)
-        env['DELEGATE_ATTACHMENTS'] = ','.join(paths)
+            dest = attach_dir / att.filename
+            await att.save(str(dest))
+            paths.append(str(dest))
+        env = {**os.environ, 'DELEGATE_ATTACHMENTS': ','.join(paths)}
         attach_count = len(paths)
 
     log.info('dispatch channel=%s msg_len=%d attachments=%d', message.channel.id, len(content), attach_count)
 
     try:
-        proc = subprocess.Popen(
-            ['delegate', 'discord', str(message.channel.id), content],
-            env=env,
-            start_new_session=True
-        )
+        cmd = [sys.executable, str(DELEGATE_PY), 'discord', str(message.channel.id), content]
+        if sys.platform == 'win32':
+            proc = subprocess.Popen(
+                cmd, env=env,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+            )
+        else:
+            proc = subprocess.Popen(
+                cmd, env=env,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
         log.info('delegate pid=%d', proc.pid)
     except Exception as e:
         log.error('delegate spawn failed: %s', e)
