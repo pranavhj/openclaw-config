@@ -427,6 +427,30 @@ if projects_claude.exists():
     (p if 'do NOT' in content or 'do not' in content.lower() else f)(
         'projects/CLAUDE.md instructs sub-sessions not to spawn further sub-sessions')
 
+# ── 27. discord-send.py: --edit argument present (OC-023) ─────────────────────
+print('\n27. discord-send.py live-progress additions (OC-023)')
+
+discord_send_src = src('discord-send.py')
+(p if '--edit' in discord_send_src else f)('discord-send.py has --edit argument')
+(p if 'PATCH' in discord_send_src else f)('discord-send.py uses PATCH method for edits')
+(p if 'MSG_ID:' in discord_send_src else f)("discord-send.py prints 'MSG_ID:' on success")
+(p if "msg_id = data.get('id', '')" in discord_send_src else f)(
+    'discord-send.py extracts message ID from response')
+
+# ── 28. delegate.py: active-session.json + status message (OC-023) ────────────
+print('\n28. delegate.py active-session tracking (OC-023)')
+
+(p if 'ACTIVE_SESSION_FILE' in delegate_src else f)(
+    'delegate.py defines ACTIVE_SESSION_FILE')
+(p if 'active-session.json' in delegate_src else f)(
+    "delegate.py references 'active-session.json'")
+(p if 'status_msg_id' in delegate_src else f)(
+    'delegate.py captures status_msg_id from discord-send.py output')
+(p if 'Working' in delegate_src and 'MSG_ID:' in delegate_src else f)(
+    "delegate.py sends Working status and parses MSG_ID response")
+(p if 'ACTIVE_SESSION_FILE.unlink' in delegate_src else f)(
+    'delegate.py cleans up active-session.json in finally block')
+
 # ── Summary ────────────────────────────────────────────────────────────────────
 print()
 print('==============================')

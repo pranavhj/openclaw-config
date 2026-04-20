@@ -7,7 +7,10 @@ import json
 import logging
 import asyncio
 import glob
+import re
 import tempfile
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 DELEGATE_PY = Path(__file__).parent / 'delegate.py'
@@ -26,6 +29,18 @@ ALLOWED_USER = 1277144623231537274
 
 CLAUDE_PROJECTS_DIR = os.path.expanduser('~/.claude/projects')
 
+LOGDIR = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'openclaw'
+ACTIVE_SESSION_FILE = LOGDIR / 'active-session.json'
+TOOL_ICONS = {
+    'Bash': '\U0001f527', 'Edit': '\U0001f4dd', 'Read': '\U0001f4d6', 'Write': '\u270f\ufe0f',
+    'Glob': '\U0001f50d', 'Grep': '\U0001f50d', 'WebFetch': '\U0001f310', 'Task': '\U0001f916',
+}
+_status_events = []
+_last_edit_ts = 0.0
+_active_session = None
+_session_start_mono = 0.0
+
+
 def project_label(filepath):
     """Extract a short project name from a JSONL path."""
     dirname = os.path.basename(os.path.dirname(filepath))
@@ -35,7 +50,6 @@ def project_label(filepath):
         if dirname.startswith(prefix):
             return dirname[len(prefix):]
     # Windows: C--Users-prana-projects-<slug>
-    import re
     m = re.search(r'-projects-(.+)$', dirname)
     if m:
         return m.group(1)
@@ -75,8 +89,25 @@ def format_entry(entry, project):
 
     return lines
 
+async def _edit_status(session, elapsed_s, done=False):
+    """Edit the in-progress status message with current tool activity."""
+    channel_id = int(session['target'])
+    message_id = int(session['status_message_id'])
+    project = session.get('project', 'openclaw')
+    header = f'{"✅ Done" if done else "🔄 Working…"} `{elapsed_s}s` · {project}'
+    lines = [header]
+    for ev in _status_events[-5:]:
+        icon = TOOL_ICONS.get(ev['tool'], '⚙️')
+        lines.append(f'||{icon} **{ev["tool"]}**: {ev["detail"][:80]}||')
+    try:
+        await client.http.edit_message(channel_id, message_id, content='\n'.join(lines))
+    except Exception as e:
+        log.debug('status edit skipped: %s', e)
+
+
 async def watch_claude_sessions():
     """Poll ~/.claude/projects for new JSONL lines and pretty-print to stdout."""
+    global _active_session, _status_events, _last_edit_ts, _session_start_mono
     file_positions = {}  # filepath -> byte offset
 
     # Seed all existing files at their current end so we only show new activity
@@ -89,6 +120,39 @@ async def watch_claude_sessions():
     while True:
         await asyncio.sleep(1)
         try:
+            # Track active delegation session for live status updates
+            prev_session = _active_session
+            try:
+                session_data = json.loads(ACTIVE_SESSION_FILE.read_text(encoding='utf-8'))
+                # Max-age guard: clean up stale files (>30 min)
+                ts_start = session_data.get('ts_start', '')
+                if ts_start:
+                    try:
+                        dt = datetime.fromisoformat(ts_start.replace('Z', '+00:00'))
+                        if (datetime.now(timezone.utc) - dt).total_seconds() > 1800:
+                            ACTIVE_SESSION_FILE.unlink(missing_ok=True)
+                            session_data = None
+                    except (ValueError, OSError):
+                        pass
+                if session_data is not None:
+                    _active_session = session_data
+                    if prev_session is None:
+                        _session_start_mono = time.monotonic()
+                        _status_events.clear()
+                elif prev_session is not None:
+                    elapsed = int(time.monotonic() - _session_start_mono)
+                    await _edit_status(prev_session, elapsed, done=True)
+                    _active_session = None
+                    _status_events.clear()
+                    _last_edit_ts = 0.0
+            except Exception:
+                if prev_session is not None:
+                    elapsed = int(time.monotonic() - _session_start_mono)
+                    await _edit_status(prev_session, elapsed, done=True)
+                    _active_session = None
+                    _status_events.clear()
+                    _last_edit_ts = 0.0
+
             current_files = set(glob.glob(f'{CLAUDE_PROJECTS_DIR}/**/*.jsonl', recursive=True))
 
             # Remove stale entries for deleted files
@@ -132,8 +196,23 @@ async def watch_claude_sessions():
                         entry = json.loads(line)
                         for msg_line in format_entry(entry, project):
                             print(msg_line, flush=True)
+                            if _active_session and '[tool]' in msg_line:
+                                parts = msg_line.split('] [tool] ', 1)
+                                if len(parts) == 2:
+                                    tool_name, _, detail = parts[1].partition(': ')
+                                    _status_events.append({
+                                        'tool': tool_name.strip(),
+                                        'detail': detail.strip(),
+                                    })
+                                    _active_session['project'] = project
                     except json.JSONDecodeError:
                         pass
+
+            # Throttled status message edit (~every 3s)
+            if _active_session and (time.monotonic() - _last_edit_ts) >= 3.0:
+                elapsed = int(time.monotonic() - _session_start_mono)
+                await _edit_status(_active_session, elapsed)
+                _last_edit_ts = time.monotonic()
 
         except Exception as e:
             log.error('session watcher error: %s', e)

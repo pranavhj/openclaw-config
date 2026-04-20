@@ -25,6 +25,7 @@ DISCORD_SEND_PY = SCRIPT_DIR / 'discord-send.py'
 SESSION_RESET_PY = SCRIPT_DIR / 'session-reset.py'
 
 LOGDIR = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'openclaw'
+ACTIVE_SESSION_FILE = LOGDIR / 'active-session.json'
 WORK_DIR = Path.home() / 'projects' / 'openclaw'
 
 
@@ -123,8 +124,34 @@ def main():
     try:
         tl({'ts': ts_ms(), 'event': 'lock_acquired'})
         print(f'delegation started \u2014 log: {log_file}')
+
+        # Send "Working…" status message; write active-session.json for live progress display
+        try:
+            send_result = subprocess.run(
+                [sys.executable, str(DISCORD_SEND_PY), '--target', target,
+                 '--message', '\U0001f504 Working\u2026'],
+                capture_output=True, text=True,
+            )
+            status_msg_id = None
+            for line in send_result.stdout.splitlines():
+                if line.startswith('MSG_ID:'):
+                    status_msg_id = line[7:].strip()
+            if status_msg_id:
+                ACTIVE_SESSION_FILE.write_text(json.dumps({
+                    'target': target,
+                    'status_message_id': status_msg_id,
+                    'project': 'openclaw',
+                    'ts_start': ts_recv,
+                }), encoding='utf-8')
+        except Exception:
+            pass
+
         _run(channel, target, message, today, log_file, tl_log, ts_recv, orig_len, sanitized_len, t0, tl, log)
     finally:
+        try:
+            ACTIVE_SESSION_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
         try:
             lock_dir.rmdir()
         except Exception:
