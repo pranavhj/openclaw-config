@@ -67,6 +67,22 @@ def maybe_compact(session_dir: Path) -> None:
         keep_n = KEEP_PAIRS * 2
         kept = msg_entries[-keep_n:]
 
+        # Drop a leading user message that contains only tool_result blocks
+        # (its matching tool_use was cut off by compaction).
+        while kept:
+            try:
+                first = json.loads(kept[0].strip())
+                if first.get('type') == 'user':
+                    content = first.get('message', {}).get('content', [])
+                    if isinstance(content, list) and content and all(
+                        c.get('type') == 'tool_result' for c in content
+                    ):
+                        kept = kept[1:]
+                        continue
+            except Exception:
+                pass
+            break
+
         dst = session_dir / f'{uuid.uuid4()}.jsonl'
         dst.write_text(''.join(kept), encoding='utf-8')
         current.unlink()
