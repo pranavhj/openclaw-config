@@ -61,6 +61,15 @@ Your prompt includes a `## Known projects` section. Use it to decide how to hand
 (unset CLAUDECODE; cd <full_path> && python D:\MyData\Software\openclaw-config\bin\agent-smart.py --continue --permission-mode bypassPermissions --print "## Reply
 Target: <target>
 
+## Communication
+Send all responses and questions to the user via:
+  python D:\MyData\Software\openclaw-config\bin\discord-send.py --target <target> --message \"<text>\"
+Then output: SENT
+
+If you need clarification before proceeding, send your question via discord-send.py, output SENT, and stop.
+Your answer will arrive as the next message — you will resume this session with full history via --continue.
+Do NOT output responses as stdout — they will not be forwarded.
+
 ## Recent messages
 <pass through the ## Recent messages section from your own prompt>
 
