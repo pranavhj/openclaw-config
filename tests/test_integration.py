@@ -230,6 +230,7 @@ print('3b. bin/ directory integrity')
 ALLOWED = {
     'delegate.py', 'discord-bot.py', 'discord-send.py', 'agent-smart.py',
     'session-reset.py', 'bot-logs.py', 'route-audit.py', 'run-tests.py',
+    'manage-service.ps1',
     'openclaw-timeline',
     'delegate', 'discord-send', 'agent-smart', 'session-reset',
     'bot-logs', 'route-audit', 'run-tests',

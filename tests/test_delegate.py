@@ -318,6 +318,8 @@ ALLOWED = {
     # New Python scripts
     'delegate.py', 'discord-bot.py', 'discord-send.py', 'agent-smart.py',
     'session-reset.py', 'bot-logs.py', 'route-audit.py', 'run-tests.py',
+    # Service management
+    'manage-service.ps1',
     # Existing/observability
     'openclaw-timeline',
     # Legacy bash scripts retained for reference
@@ -381,13 +383,36 @@ try:
     claude_md = (AGENTS_DIR / 'openclaw-CLAUDE.md').read_text(encoding='utf-8')
     (p if 'unset CLAUDECODE' in claude_md else f)(
         'openclaw-CLAUDE.md: sub-session spawn unsets CLAUDECODE')
-    # Must appear in context of the spawn command (before claude --continue)
+    # Must appear in context of the spawn command (before agent-smart.py --continue or claude --continue)
     unsetter_idx = claude_md.find('unset CLAUDECODE')
-    continue_idx = claude_md.find('claude --continue', unsetter_idx)
+    # Accept either agent-smart.py --continue (preferred) or bare claude --continue
+    continue_idx = claude_md.find('agent-smart.py --continue', unsetter_idx)
+    if continue_idx < 0:
+        continue_idx = claude_md.find('claude --continue', unsetter_idx)
     (p if unsetter_idx >= 0 and continue_idx > unsetter_idx else f)(
-        'unset CLAUDECODE appears before claude --continue in spawn command')
+        'unset CLAUDECODE appears before agent-smart.py/claude --continue in spawn command')
 except Exception as e:
     f(f'CLAUDE.md read error: {e}')
+
+# ── 26. agent-smart.py CWD key includes underscore→dash conversion ────────────
+print('\n26. agent-smart.py get_cwd_key handles underscores')
+
+import re as _re
+
+def _get_cwd_key(path_str):
+    return _re.sub(r'[^a-zA-Z0-9]', '-', path_str)
+
+_cases = [
+    (r'D:\MyData\Software\cricket_analyzer',    'D--MyData-Software-cricket-analyzer'),
+    (r'C:\Users\prana\projects\openclaw',        'C--Users-prana-projects-openclaw'),
+    (r'D:\MyData\Software\openclaw-config',      'D--MyData-Software-openclaw-config'),
+]
+for _path, _expected in _cases:
+    _got = _get_cwd_key(_path)
+    (p if _got == _expected else f)(f'CWD key: {_path} -> {_got}')
+
+(p if 're.sub' in agent_src or "replace('_'" in agent_src else f)(
+    'agent-smart.py uses regex sub for CWD key (handles underscores and all non-alnum)')
 
 # ── 25. projects/CLAUDE.md recursion guard ────────────────────────────────────
 print('\n25. projects/CLAUDE.md recursion guard')

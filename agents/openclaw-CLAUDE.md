@@ -58,7 +58,7 @@ Your prompt includes a `## Known projects` section. Use it to decide how to hand
 3. Spawn an isolated project sub-session and let it handle delivery:
 
 ```
-(unset CLAUDECODE; cd <full_path> && claude --continue --permission-mode bypassPermissions --print "## Reply
+(unset CLAUDECODE; cd <full_path> && python D:\MyData\Software\openclaw-config\bin\agent-smart.py --continue --permission-mode bypassPermissions --print "## Reply
 Target: <target>
 
 ## Recent messages
@@ -70,7 +70,7 @@ Target: <target>
 
 4. Output: SENT
 
-**How it works:** `--print` is one-shot — the sub-session spawns, does the work, sends to Discord, and exits. The JSONL session history in that project dir persists between calls. Each new message spawns a fresh process that reads the full prior history via `--continue`. PROGRESS.md is a lightweight human-readable summary on top of that.
+**How it works:** `--print` is one-shot — the sub-session spawns, does the work, sends to Discord, and exits. The JSONL session history in that project dir persists between calls. Each new message spawns a fresh process that reads the full prior history via `--continue`. `agent-smart.py` auto-compacts sessions >400KB (keeps last 5 pairs) to control context size and credit usage. PROGRESS.md is a lightweight human-readable summary on top of that.
 
 ## openclaw system
 

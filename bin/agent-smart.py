@@ -18,6 +18,7 @@ NOTE: On Windows, claude is typically installed as a .cmd file (via npm).
   for normal message content.
 """
 import json
+import re
 import subprocess
 import sys
 import uuid
@@ -30,12 +31,12 @@ KEEP_PAIRS = 5
 def get_cwd_key() -> str:
     """Derive Claude Code's session directory key from the current working directory.
 
-    Mirrors the Linux behavior: `pwd | sed 's|/|-|g'`
-    On Windows paths like C:\\Users\\prana\\projects\\openclaw the result is
-    C--Users-prana-projects-openclaw.
+    Claude Code converts all non-alphanumeric characters to dashes.
+    e.g. C:\\Users\\prana\\projects\\openclaw -> C--Users-prana-projects-openclaw
+         D:\\MyData\\Software\\cricket_analyzer -> D--MyData-Software-cricket-analyzer
     """
     cwd = str(Path.cwd())
-    return cwd.replace('\\', '-').replace('/', '-').replace(':', '-')
+    return re.sub(r'[^a-zA-Z0-9]', '-', cwd)
 
 
 def maybe_compact(session_dir: Path) -> None:
