@@ -492,8 +492,8 @@ routing_block = routing_block[:routing_block.find('cwd=')]
 if agent_smart:
     (p if agent_smart.THRESHOLD_KB == 100 else f)(
         f'agent-smart.py THRESHOLD_KB == 100 (got: {agent_smart.THRESHOLD_KB})')
-    (p if agent_smart.KEEP_PAIRS == 3 else f)(
-        f'agent-smart.py KEEP_PAIRS == 3 (got: {agent_smart.KEEP_PAIRS})')
+    (p if agent_smart.KEEP_PAIRS == 5 else f)(
+        f'agent-smart.py KEEP_PAIRS == 5 (got: {agent_smart.KEEP_PAIRS})')
 else:
     # Fall back to source parsing
     import re as _re2
@@ -501,8 +501,8 @@ else:
     m_kp = _re2.search(r'KEEP_PAIRS\s*=\s*(\d+)', agent_src)
     (p if m_kb and int(m_kb.group(1)) == 100 else f)(
         f'THRESHOLD_KB == 100 in source (got: {m_kb.group(1) if m_kb else "missing"})')
-    (p if m_kp and int(m_kp.group(1)) == 3 else f)(
-        f'KEEP_PAIRS == 3 in source (got: {m_kp.group(1) if m_kp else "missing"})')
+    (p if m_kp and int(m_kp.group(1)) == 5 else f)(
+        f'KEEP_PAIRS == 5 in source (got: {m_kp.group(1) if m_kp else "missing"})')
 
 # projects/openclaw/CLAUDE.md sub-session command must pin --model sonnet
 openclaw_claude_md = Path.home() / 'projects' / 'openclaw' / 'CLAUDE.md'
@@ -519,8 +519,8 @@ if openclaw_claude_md.exists():
     # Compaction comment must reflect new values
     (p if '>100KB' in oc_content or '100KB' in oc_content else f)(
         "openclaw CLAUDE.md compaction comment updated to 100KB")
-    (p if 'keeps last 3 pairs' in oc_content else f)(
-        "openclaw CLAUDE.md compaction comment updated to 3 pairs")
+    (p if 'keeps last 5 pairs' in oc_content else f)(
+        "openclaw CLAUDE.md compaction comment updated to 5 pairs")
 else:
     skip(f'projects/openclaw/CLAUDE.md not found at {openclaw_claude_md}')
 

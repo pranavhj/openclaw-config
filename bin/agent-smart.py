@@ -25,7 +25,7 @@ import uuid
 from pathlib import Path
 
 THRESHOLD_KB = 100
-KEEP_PAIRS = 3
+KEEP_PAIRS = 5
 
 
 def get_cwd_key() -> str:
@@ -39,7 +39,7 @@ def get_cwd_key() -> str:
     return re.sub(r'[^a-zA-Z0-9]', '-', cwd)
 
 
-def maybe_compact(session_dir: Path) -> None:
+def maybe_compact(session_dir: Path, keep_pairs: int = KEEP_PAIRS) -> None:
     """Compact the current session file if it exceeds the size threshold."""
     if not session_dir.is_dir():
         return
@@ -53,7 +53,7 @@ def maybe_compact(session_dir: Path) -> None:
     if size_kb <= THRESHOLD_KB:
         return
 
-    print(f'[agent-smart] session {size_kb}KB > {THRESHOLD_KB}KB — compacting, keeping last {KEEP_PAIRS} pairs')
+    print(f'[agent-smart] session {size_kb}KB > {THRESHOLD_KB}KB — compacting, keeping last {keep_pairs} pairs')
 
     try:
         lines = current.read_text(encoding='utf-8', errors='replace').splitlines(keepends=True)
@@ -64,7 +64,7 @@ def maybe_compact(session_dir: Path) -> None:
                     msg_entries.append(line)
             except Exception:
                 pass
-        keep_n = KEEP_PAIRS * 2
+        keep_n = keep_pairs * 2
         kept = msg_entries[-keep_n:]
 
         # Drop a leading user message that contains only tool_result blocks
@@ -92,14 +92,21 @@ def maybe_compact(session_dir: Path) -> None:
 
 
 def main():
+    # Strip --keep-pairs N early — it's our flag, not a claude arg.
+    args = list(sys.argv[1:])
+    keep_pairs = KEEP_PAIRS
+    if '--keep-pairs' in args:
+        idx = args.index('--keep-pairs')
+        keep_pairs = int(args[idx + 1])
+        args = args[:idx] + args[idx + 2:]
+
     cwd_key = get_cwd_key()
     session_dir = Path.home() / '.claude' / 'projects' / cwd_key
-    maybe_compact(session_dir)
+    maybe_compact(session_dir, keep_pairs)
 
     # --print-file <path>: read prompt from file and pass via --print.
     # Used by delegate.py on Windows to avoid cmd.exe newline-splitting
     # when multi-line prompts are passed as a command-line argument.
-    args = sys.argv[1:]
     if '--print-file' in args:
         idx = args.index('--print-file')
         prompt_file = args[idx + 1]
