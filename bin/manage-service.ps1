@@ -58,7 +58,12 @@ function Apply-Config {
     Nssm set $ServiceName AppRotateFiles   1
     Nssm set $ServiceName AppRotateOnline  1
     Nssm set $ServiceName AppRotateBytes   5000000
-    Nssm set $ServiceName Start            SERVICE_AUTO_START
+    Nssm set $ServiceName Start                 SERVICE_AUTO_START
+    # Stop behaviour: try Ctrl+C for 3s then kill process tree (prevents STOP_PENDING hangs)
+    Nssm set $ServiceName AppStopMethodConsole  3000
+    Nssm set $ServiceName AppStopMethodWindow   0
+    Nssm set $ServiceName AppStopMethodThreads  0
+    Nssm set $ServiceName AppKillProcessTree    1
     # AppEnvironmentExtra is REG_MULTI_SZ — write directly to registry
     $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName\Parameters"
     Set-ItemProperty -Path $regPath -Name AppEnvironmentExtra -Value $ExtraEnv -Type MultiString

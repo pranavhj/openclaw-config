@@ -7,9 +7,13 @@ Prerequisite (one-time admin setup):
 After that one-time setup this script works from any non-elevated process,
 including Claude Code sessions.
 """
+import io
 import subprocess
 import sys
 import time
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 SERVICE = "discord-bot"
 
@@ -30,25 +34,26 @@ def main():
     state = query_state()
     print(f"discord-bot: {state}")
 
-    # If stuck in STOP_PENDING wait a bit — sometimes the SCM just needs a moment
+    # If already stuck in STOP_PENDING on entry, wait up to 10s for natural clearance
     if state == "STOP_PENDING":
-        print("STOP_PENDING — waiting up to 15s for it to clear...")
-        for _ in range(15):
+        print("STOP_PENDING on entry — waiting up to 10s for it to clear...")
+        for _ in range(10):
             time.sleep(1)
             state = query_state()
             if state != "STOP_PENDING":
-                print(f"  cleared → {state}")
+                print(f"  cleared -> {state}")
                 break
         if state == "STOP_PENDING":
-            print("Still STOP_PENDING after 15s.")
-            print("The underlying Python/NSSM process is running as SYSTEM and cannot be killed")
-            print("without elevation. Run manage-service.ps1 restart once as admin to clear it.")
+            print("Still STOP_PENDING. NSSM/Python runs as SYSTEM and needs admin to force-kill.")
+            print("Run as admin: manage-service.ps1 restart")
             sys.exit(1)
 
     if state == "RUNNING":
         print("Stopping...")
         sc_cmd("stop")
-        for _ in range(15):
+        # With AppStopMethodConsole=3000 + AppKillProcessTree, service stops within ~5s.
+        # Allow up to 30s for the kill to propagate through SCM.
+        for _ in range(30):
             time.sleep(1)
             state = query_state()
             if state == "STOPPED":
@@ -56,6 +61,8 @@ def main():
                 break
         else:
             print(f"  timed out waiting for STOPPED (state: {state})")
+            print("Run as admin: manage-service.ps1 restart")
+            sys.exit(1)
 
     print("Starting...")
     r = sc_cmd("start")
@@ -64,7 +71,7 @@ def main():
         if "already running" in err.lower():
             pass  # race: already up
         elif "access is denied" in err.lower():
-            print(f"Access denied — run 'manage-service.ps1 grant-user' as admin first.")
+            print("Access denied — run 'manage-service.ps1 grant-user' as admin first.")
             sys.exit(1)
         else:
             print(f"sc start failed (exit {r.returncode}): {err}")
@@ -75,10 +82,10 @@ def main():
         time.sleep(1)
         state = query_state()
         if state == "RUNNING":
-            print(f"\u2705 discord-bot RUNNING (after {i + 1}s)")
+            print(f"OK discord-bot RUNNING (after {i + 1}s)")
             sys.exit(0)
 
-    print(f"\u274c discord-bot did not reach RUNNING state (final: {query_state()})")
+    print(f"FAIL discord-bot did not reach RUNNING state (final: {query_state()})")
     sys.exit(1)
 
 
