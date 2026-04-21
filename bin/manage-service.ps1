@@ -136,7 +136,7 @@ switch ($Action) {
         $Sddl    = ($RawSddl | Where-Object { $_ -match 'D:' }) -replace '^\s+', ''
 
         if (-not $Sddl) {
-            Write-Error "Could not read SDDL for $ServiceName — is the service installed?"
+            Write-Error "Could not read SDDL for $ServiceName - is the service installed?"
             exit 1
         }
 
@@ -146,7 +146,7 @@ switch ($Action) {
         $Ace = "(A;;CCLCSWRPWPDTLOCRRC;;;$Sid)"
 
         if ($Sddl -match [regex]::Escape($Ace)) {
-            Write-Host "ACE already present — '$User' already has service control rights."
+            Write-Host "ACE already present - '$User' already has service control rights."
             exit 0
         }
 
