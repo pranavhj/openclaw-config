@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import discord
+import io
 import subprocess
 import os
 import sys
@@ -12,6 +13,12 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Ensure stdout/stderr use UTF-8 under NSSM (default is cp1252 on Windows)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 DELEGATE_PY = Path(__file__).parent / 'delegate.py'
 

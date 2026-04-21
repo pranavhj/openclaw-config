@@ -106,6 +106,13 @@ switch ($Action) {
     'restart' {
         Write-Host "Applying config and restarting $ServiceName..."
         Apply-Config
+        # If stuck in STOP_PENDING, force-kill the underlying processes first
+        $svcStatus = (Get-Service $ServiceName -ErrorAction SilentlyContinue).Status
+        if ($svcStatus -eq 'StopPending') {
+            Write-Host "Service stuck in StopPending - force-killing python/nssm processes..."
+            Get-Process -Name python, nssm -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep 3
+        }
         Nssm restart $ServiceName
         Write-Host "Restarted."
         Show-Status
