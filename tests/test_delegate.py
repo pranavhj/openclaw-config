@@ -456,8 +456,12 @@ print('\n28. delegate.py active-session tracking (OC-023)')
 print('\n29. Non-elevated service restart (OC-024)')
 
 restart_src = src('restart-bot.py')
-(p if 'restart-bot.signal' in restart_src else f)('restart-bot.py uses signal file approach')
-(p if 'SIGNAL_FILE' in restart_src else f)('restart-bot.py defines SIGNAL_FILE')
+(p if 'sc' in restart_src and ('stop' in restart_src or 'start' in restart_src) else f)(
+    'restart-bot.py uses sc stop/start approach')
+(p if "'stop'" in restart_src or '"stop"' in restart_src else f)(
+    "restart-bot.py calls sc stop")
+(p if "'start'" in restart_src or '"start"' in restart_src else f)(
+    "restart-bot.py calls sc start")
 (p if 'ready user=' in restart_src else f)("restart-bot.py waits for 'ready' in log")
 (p if 'manage-service.ps1' in restart_src else f)('restart-bot.py references manage-service.ps1')
 
@@ -466,6 +470,59 @@ ps1_src = src('manage-service.ps1')
 (p if 'sc.exe sdshow' in ps1_src else f)('manage-service.ps1 reads current SDDL')
 (p if 'sc.exe sdset' in ps1_src else f)('manage-service.ps1 writes new SDDL')
 (p if 'CCLCSWRPWPDTLOCRRC' in ps1_src else f)('manage-service.ps1 uses correct ACE rights string')
+
+# ── 30. OC-026: quota optimization checks ─────────────────────────────────────
+print('\n30. OC-026 quota optimization (stateless Haiku routing + lower compaction)')
+
+# delegate.py routing call must NOT use --continue
+routing_block = delegate_src[delegate_src.rfind('AGENT_SMART_PY'):]
+routing_block = routing_block[:routing_block.find('cwd=')]
+(p if '--continue' not in routing_block else f)(
+    "delegate.py routing call does NOT pass --continue (stateless)")
+
+# delegate.py routing call must use haiku
+(p if "'haiku'" in routing_block or '"haiku"' in routing_block else f)(
+    "delegate.py routing call uses 'haiku' model")
+
+# delegate.py routing call must NOT use sonnet
+(p if "'sonnet'" not in routing_block and '"sonnet"' not in routing_block else f)(
+    "delegate.py routing call does not use 'sonnet'")
+
+# agent-smart.py threshold and pairs must match new values
+if agent_smart:
+    (p if agent_smart.THRESHOLD_KB == 100 else f)(
+        f'agent-smart.py THRESHOLD_KB == 100 (got: {agent_smart.THRESHOLD_KB})')
+    (p if agent_smart.KEEP_PAIRS == 3 else f)(
+        f'agent-smart.py KEEP_PAIRS == 3 (got: {agent_smart.KEEP_PAIRS})')
+else:
+    # Fall back to source parsing
+    import re as _re2
+    m_kb = _re2.search(r'THRESHOLD_KB\s*=\s*(\d+)', agent_src)
+    m_kp = _re2.search(r'KEEP_PAIRS\s*=\s*(\d+)', agent_src)
+    (p if m_kb and int(m_kb.group(1)) == 100 else f)(
+        f'THRESHOLD_KB == 100 in source (got: {m_kb.group(1) if m_kb else "missing"})')
+    (p if m_kp and int(m_kp.group(1)) == 3 else f)(
+        f'KEEP_PAIRS == 3 in source (got: {m_kp.group(1) if m_kp else "missing"})')
+
+# projects/openclaw/CLAUDE.md sub-session command must pin --model sonnet
+openclaw_claude_md = Path.home() / 'projects' / 'openclaw' / 'CLAUDE.md'
+if openclaw_claude_md.exists():
+    oc_content = openclaw_claude_md.read_text(encoding='utf-8', errors='replace')
+    # Find the sub-session spawn block (contains agent-smart.py --continue)
+    spawn_idx = oc_content.find('agent-smart.py --continue')
+    if spawn_idx >= 0:
+        spawn_line = oc_content[spawn_idx:spawn_idx + 200].split('\n')[0]
+        (p if '--model sonnet' in spawn_line else f)(
+            f"openclaw CLAUDE.md sub-session spawn has '--model sonnet'")
+    else:
+        f('openclaw CLAUDE.md: agent-smart.py --continue spawn line not found')
+    # Compaction comment must reflect new values
+    (p if '>100KB' in oc_content or '100KB' in oc_content else f)(
+        "openclaw CLAUDE.md compaction comment updated to 100KB")
+    (p if 'keeps last 3 pairs' in oc_content else f)(
+        "openclaw CLAUDE.md compaction comment updated to 3 pairs")
+else:
+    skip(f'projects/openclaw/CLAUDE.md not found at {openclaw_claude_md}')
 
 # ── Summary ────────────────────────────────────────────────────────────────────
 print()
