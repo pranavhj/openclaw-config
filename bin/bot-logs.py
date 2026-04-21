@@ -3,10 +3,14 @@
 
 Usage: python bot-logs.py
 """
+import io
 import os
 import sys
 import time
 from pathlib import Path
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 LOG_FILE = Path(os.getenv('LOCALAPPDATA') or '') / 'openclaw' / 'bot.log'
 

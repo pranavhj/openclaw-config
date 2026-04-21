@@ -121,6 +121,8 @@ def main():
         print('SENT')
         return
 
+    status_msg_id = None  # declared here so finally block can access it
+
     try:
         tl({'ts': ts_ms(), 'event': 'lock_acquired'})
         print(f'delegation started \u2014 log: {log_file}')
@@ -148,6 +150,18 @@ def main():
 
         _run(channel, target, message, today, log_file, tl_log, ts_recv, orig_len, sanitized_len, t0, tl, log)
     finally:
+        # Edit status message to "Done" before cleanup
+        if status_msg_id:
+            try:
+                elapsed_s = int(time.monotonic() - t0)
+                subprocess.run(
+                    [sys.executable, str(DISCORD_SEND_PY), '--target', target,
+                     '--message', f'\u2705 Done \u00b7 {elapsed_s}s',
+                     '--edit', status_msg_id],
+                    capture_output=True, text=True, timeout=5,
+                )
+            except Exception:
+                pass
         try:
             ACTIVE_SESSION_FILE.unlink(missing_ok=True)
         except Exception:

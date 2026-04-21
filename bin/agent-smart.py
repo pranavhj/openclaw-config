@@ -120,6 +120,21 @@ def main():
         )
         sys.exit(result.returncode)
 
+    # On Windows, cmd.exe truncates --print "value" at the first newline.
+    # Intercept --print <value> and pass via stdin instead.
+    if sys.platform == 'win32' and '--print' in args:
+        idx = args.index('--print')
+        prompt = args[idx + 1]
+        args = args[:idx] + args[idx + 2:]
+        result = subprocess.run(
+            ['claude'] + args,
+            input=prompt,
+            text=True,
+            encoding='utf-8',
+            shell=True,
+        )
+        sys.exit(result.returncode)
+
     # On Windows, claude is a .cmd file that requires cmd.exe to execute.
     # shell=True lets Python invoke it through cmd.exe automatically.
     shell = sys.platform == 'win32'

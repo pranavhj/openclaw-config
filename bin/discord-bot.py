@@ -107,9 +107,10 @@ async def _edit_status(session, elapsed_s, done=False):
         icon = TOOL_ICONS.get(ev['tool'], '⚙️')
         lines.append(f'||{icon} **{ev["tool"]}**: {ev["detail"][:80]}||')
     try:
-        await client.http.edit_message(channel_id, message_id, content='\n'.join(lines))
+        ch = client.get_partial_messageable(channel_id)
+        await ch.get_partial_message(message_id).edit(content='\n'.join(lines))
     except Exception as e:
-        log.debug('status edit skipped: %s', e)
+        log.warning('status edit failed: %s', e)
 
 
 async def watch_claude_sessions():
@@ -240,8 +241,8 @@ async def watch_restart_signal():
                 RESTART_SIGNAL_FILE.unlink()
             except Exception:
                 pass
-            log.info('restart signal received — closing for NSSM restart')
-            await client.close()
+            log.info('restart signal received — exiting for NSSM restart')
+            os._exit(0)
 
 
 @client.event
