@@ -228,10 +228,27 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
+RESTART_SIGNAL_FILE = LOGDIR / 'restart-bot.signal'
+
+
+async def watch_restart_signal():
+    """Exit cleanly when restart-bot.py drops a signal file. NSSM auto-restarts the app."""
+    while True:
+        await asyncio.sleep(2)
+        if RESTART_SIGNAL_FILE.exists():
+            try:
+                RESTART_SIGNAL_FILE.unlink()
+            except Exception:
+                pass
+            log.info('restart signal received — closing for NSSM restart')
+            await client.close()
+
+
 @client.event
 async def on_ready():
     log.info('ready user=%s id=%s', client.user, client.user.id)
     asyncio.create_task(watch_claude_sessions())
+    asyncio.create_task(watch_restart_signal())
     log.info('session watcher started')
 
 @client.event

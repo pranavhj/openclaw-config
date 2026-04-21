@@ -1,91 +1,69 @@
 #!/usr/bin/env python3
-"""restart-bot.py — restart the discord-bot service without admin elevation.
+"""restart-bot.py — restart the discord-bot without touching the NSSM service.
 
-Prerequisite (one-time admin setup):
-    powershell -File D:\MyData\Software\openclaw-config\bin\manage-service.ps1 grant-user
+Drops a signal file that discord-bot.py watches; the bot exits cleanly and
+NSSM auto-restarts it (AppExit Default Restart). The NSSM service itself never
+enters STOP_PENDING, so no admin elevation is needed.
 
-After that one-time setup this script works from any non-elevated process,
-including Claude Code sessions.
+Prerequisite: manage-service.ps1 must have been run at least once as admin
+to apply AppExit=Restart and the other NSSM settings.
 """
 import io
-import subprocess
+import os
 import sys
 import time
+from pathlib import Path
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-SERVICE = "discord-bot"
+LOGDIR = Path(os.getenv('LOCALAPPDATA', '')) / 'openclaw'
+SIGNAL_FILE = LOGDIR / 'restart-bot.signal'
+LOG_FILE = LOGDIR / 'bot.log'
 
 
-def query_state():
-    r = subprocess.run(["sc", "query", SERVICE], capture_output=True, text=True)
-    for state in ("RUNNING", "STOP_PENDING", "START_PENDING", "STOPPED"):
-        if state in r.stdout:
-            return state
-    return "UNKNOWN"
-
-
-def sc_cmd(action):
-    return subprocess.run(["sc", action, SERVICE], capture_output=True, text=True)
+def tail_log(n=3):
+    """Return last n lines of the bot log."""
+    try:
+        lines = LOG_FILE.read_text(encoding='utf-8', errors='replace').splitlines()
+        return lines[-n:]
+    except Exception:
+        return []
 
 
 def main():
-    state = query_state()
-    print(f"discord-bot: {state}")
+    LOGDIR.mkdir(parents=True, exist_ok=True)
 
-    # If already stuck in STOP_PENDING on entry, wait up to 10s for natural clearance
-    if state == "STOP_PENDING":
-        print("STOP_PENDING on entry — waiting up to 10s for it to clear...")
-        for _ in range(10):
-            time.sleep(1)
-            state = query_state()
-            if state != "STOP_PENDING":
-                print(f"  cleared -> {state}")
-                break
-        if state == "STOP_PENDING":
-            print("Still STOP_PENDING. NSSM/Python runs as SYSTEM and needs admin to force-kill.")
-            print("Run as admin: manage-service.ps1 restart")
-            sys.exit(1)
+    # Drop the signal file — discord-bot.py picks it up within 2s and calls client.close()
+    SIGNAL_FILE.write_text('restart', encoding='utf-8')
+    print("Signal sent. Waiting for bot to pick it up...")
 
-    if state == "RUNNING":
-        print("Stopping...")
-        sc_cmd("stop")
-        # With AppStopMethodConsole=3000 + AppKillProcessTree, service stops within ~5s.
-        # Allow up to 30s for the kill to propagate through SCM.
-        for _ in range(30):
-            time.sleep(1)
-            state = query_state()
-            if state == "STOPPED":
-                print("  stopped.")
-                break
-        else:
-            print(f"  timed out waiting for STOPPED (state: {state})")
-            print("Run as admin: manage-service.ps1 restart")
-            sys.exit(1)
+    # Wait for signal file to be consumed (bot saw it)
+    for i in range(10):
+        time.sleep(1)
+        if not SIGNAL_FILE.exists():
+            print(f"  bot acknowledged signal after {i + 1}s")
+            break
+    else:
+        SIGNAL_FILE.unlink(missing_ok=True)
+        print("Bot did not respond to signal within 10s.")
+        print("The bot may not be running or may not have loaded the signal watcher.")
+        print("Check bot.log or run manage-service.ps1 restart as admin.")
+        sys.exit(1)
 
-    print("Starting...")
-    r = sc_cmd("start")
-    if r.returncode != 0:
-        err = (r.stderr or r.stdout or "").strip()
-        if "already running" in err.lower():
-            pass  # race: already up
-        elif "access is denied" in err.lower():
-            print("Access denied — run 'manage-service.ps1 grant-user' as admin first.")
-            sys.exit(1)
-        else:
-            print(f"sc start failed (exit {r.returncode}): {err}")
-            sys.exit(1)
-
-    print("Waiting for RUNNING...")
+    # Wait for NSSM to restart the app (AppRestartDelay=3000) and bot to reconnect
+    print("Waiting for bot to reconnect to Discord (~5-10s)...")
     for i in range(20):
         time.sleep(1)
-        state = query_state()
-        if state == "RUNNING":
-            print(f"OK discord-bot RUNNING (after {i + 1}s)")
+        recent = tail_log(5)
+        if any('ready user=' in l for l in recent):
+            print(f"OK discord-bot ready (after {i + 1}s)")
             sys.exit(0)
 
-    print(f"FAIL discord-bot did not reach RUNNING state (final: {query_state()})")
+    print("Bot did not log 'ready' within 20s after restart.")
+    print("Last log lines:")
+    for line in tail_log(5):
+        print(f"  {line}")
     sys.exit(1)
 
 
