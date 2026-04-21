@@ -31,3 +31,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-023](issues/OC-023-live-discord-progress.md) | feature | fixed | Real-time Discord progress display — status message edited every 3s with live tool calls during delegation | `feat(OC-023)` |
 | [OC-024](issues/OC-024-non-elevated-service-restart.md) | feature | fixed | Non-elevated service restart — grant-user DACL action + restart-bot.py so Claude can restart bot without admin | `feat(OC-024)` |
 | [OC-025](issues/OC-025-sub-agent-prompt-truncation-and-status-edit-bug.md) | bug | fixed | Sub-agent gets only `"## Reply"` (cmd.exe newline truncation) + status "Done" edit never fires (wrong discord.py API + client.close() doesn't exit) | `fix(OC-025)` |
+| [OC-026](issues/OC-026-quota-optimization.md) | feature | fixed | Quota optimization: stateless Haiku routing (remove --continue + sonnet→haiku) + lower compaction threshold (400→100KB, 5→3 pairs) | `feat(OC-026)` |

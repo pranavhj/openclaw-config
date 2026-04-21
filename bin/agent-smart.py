@@ -24,8 +24,8 @@ import sys
 import uuid
 from pathlib import Path
 
-THRESHOLD_KB = 400
-KEEP_PAIRS = 5
+THRESHOLD_KB = 100
+KEEP_PAIRS = 3
 
 
 def get_cwd_key() -> str:

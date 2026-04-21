@@ -283,8 +283,8 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     try:
         result = subprocess.run(
             [sys.executable, str(AGENT_SMART_PY),
-             '--continue', '--permission-mode', 'bypassPermissions',
-             '--model', 'sonnet', '--print-file', str(prompt_file)],
+             '--permission-mode', 'bypassPermissions',
+             '--model', 'haiku', '--print-file', str(prompt_file)],
             cwd=str(WORK_DIR),
             capture_output=True,
             text=True,
