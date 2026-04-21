@@ -29,3 +29,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-021](issues/OC-021-windows-migration.md) | feature | fixed | Migrate openclaw pipeline to Windows — rewrite all bash scripts to Python, eliminate VM dependency | `feat(OC-021)` |
 | [OC-022](issues/OC-022-port-tests-to-python.md) | feature | fixed | Port Linux bash test suites to Windows Python (test_delegate.py, test_integration.py, test_claude_behavior.py, run-tests.py) | `feat(OC-022)` |
 | [OC-023](issues/OC-023-live-discord-progress.md) | feature | fixed | Real-time Discord progress display — status message edited every 3s with live tool calls during delegation | `feat(OC-023)` |
+| [OC-024](issues/OC-024-non-elevated-service-restart.md) | feature | fixed | Non-elevated service restart — grant-user DACL action + restart-bot.py so Claude can restart bot without admin | `feat(OC-024)` |

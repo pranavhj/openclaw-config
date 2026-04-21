@@ -318,6 +318,7 @@ ALLOWED = {
     # New Python scripts
     'delegate.py', 'discord-bot.py', 'discord-send.py', 'agent-smart.py',
     'session-reset.py', 'bot-logs.py', 'route-audit.py', 'run-tests.py',
+    'restart-bot.py',
     # Service management
     'manage-service.ps1',
     # Existing/observability
@@ -450,6 +451,21 @@ print('\n28. delegate.py active-session tracking (OC-023)')
     "delegate.py sends Working status and parses MSG_ID response")
 (p if 'ACTIVE_SESSION_FILE.unlink' in delegate_src else f)(
     'delegate.py cleans up active-session.json in finally block')
+
+# ── 29. restart-bot.py and manage-service.ps1 grant-user (OC-024) ─────────────
+print('\n29. Non-elevated service restart (OC-024)')
+
+restart_src = src('restart-bot.py')
+(p if 'query_state' in restart_src else f)('restart-bot.py defines query_state()')
+(p if 'sc_cmd' in restart_src or 'sc' in restart_src else f)('restart-bot.py uses sc commands')
+(p if 'STOP_PENDING' in restart_src else f)('restart-bot.py handles STOP_PENDING case')
+(p if 'grant-user' in restart_src else f)('restart-bot.py hints at grant-user setup')
+
+ps1_src = src('manage-service.ps1')
+(p if 'grant-user' in ps1_src else f)("manage-service.ps1 has 'grant-user' action")
+(p if 'sc.exe sdshow' in ps1_src else f)('manage-service.ps1 reads current SDDL')
+(p if 'sc.exe sdset' in ps1_src else f)('manage-service.ps1 writes new SDDL')
+(p if 'CCLCSWRPWPDTLOCRRC' in ps1_src else f)('manage-service.ps1 uses correct ACE rights string')
 
 # ── Summary ────────────────────────────────────────────────────────────────────
 print()
