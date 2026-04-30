@@ -42,6 +42,29 @@ If no `## Reply` section is provided, fall back to Discord DM: target=1482473282
 - Timeline logs: `%LOCALAPPDATA%\openclaw\timeline-YYYY-MM-DD.log`
 - Issue tracker + source control: `D:\MyData\Software\openclaw-config\` → github.com/pranavhj/openclaw-config
 
+## Tool projects (stateless — use these directly, no sub-session)
+
+Some projects are tools to invoke, not codebases to work on. Handle these inline without spawning a `--continue` sub-session.
+
+### flightchecker (`C:\Users\prana\projects\flightchecker`)
+
+Flight price queries. Run from the project dir using the venv python:
+
+```
+cd C:\Users\prana\projects\flightchecker
+
+# Answer a natural-language question (scrapes fresh data + asks Claude):
+venv\Scripts\python.exe -m flightchecker --ask "<question>"
+
+# Validate config only:
+venv\Scripts\python.exe -m flightchecker --dry-run
+```
+
+**NEVER run without `--ask` or `--dry-run`** — bare invocation enters an infinite scheduler loop and hangs forever.
+Send the printed output directly to Discord. Output: SENT.
+
+---
+
 ## Project routing
 
 Your prompt includes a `## Known projects` section. Use it to decide how to handle the request.
@@ -58,7 +81,7 @@ Your prompt includes a `## Known projects` section. Use it to decide how to hand
 3. Spawn an isolated project sub-session and let it handle delivery:
 
 ```
-(unset CLAUDECODE; cd <full_path> && python D:\MyData\Software\openclaw-config\bin\agent-smart.py --continue --permission-mode bypassPermissions --print "## Reply
+(unset CLAUDECODE; cd <full_path> && python D:\MyData\Software\openclaw-config\bin\agent-smart.py --continue --permission-mode bypassPermissions --model sonnet [--keep-pairs N] --print "## Reply
 Target: <target>
 
 ## Communication
@@ -79,7 +102,7 @@ Do NOT output responses as stdout — they will not be forwarded.
 
 4. Output: SENT
 
-**How it works:** `--print` is one-shot — the sub-session spawns, does the work, sends to Discord, and exits. The JSONL session history in that project dir persists between calls. Each new message spawns a fresh process that reads the full prior history via `--continue`. `agent-smart.py` auto-compacts sessions >400KB (keeps last 5 pairs) to control context size and credit usage. PROGRESS.md is a lightweight human-readable summary on top of that.
+**How it works:** `--print` is one-shot — the sub-session spawns, does the work, sends to Discord, and exits. The JSONL session history in that project dir persists between calls. Each new message spawns a fresh process that reads the full prior history via `--continue`. `agent-smart.py` auto-compacts sessions >100KB (keeps last 5 pairs by default) to control context size and credit usage. Use `--keep-pairs N` in the spawn command to override per-project — e.g. `--keep-pairs 6` for complex projects with long tool-call chains. PROGRESS.md is a lightweight human-readable summary on top of that.
 
 ## openclaw system
 
