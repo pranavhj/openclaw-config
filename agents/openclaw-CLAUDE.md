@@ -42,35 +42,17 @@ If no `## Reply` section is provided, fall back to Discord DM: target=1482473282
 - Timeline logs: `%LOCALAPPDATA%\openclaw\timeline-YYYY-MM-DD.log`
 - Issue tracker + source control: `D:\MyData\Software\openclaw-config\` → github.com/pranavhj/openclaw-config
 
-## Tool projects (stateless — use these directly, no sub-session)
-
-Some projects are tools to invoke, not codebases to work on. Handle these inline without spawning a `--continue` sub-session.
-
-### flightchecker (`C:\Users\prana\projects\flightchecker`)
-
-Flight price queries. Run from the project dir using the venv python:
-
-```
-cd C:\Users\prana\projects\flightchecker
-
-# Answer a natural-language question (scrapes fresh data + asks Claude):
-venv\Scripts\python.exe -m flightchecker --ask "<question>"
-
-# Validate config only:
-venv\Scripts\python.exe -m flightchecker --dry-run
-```
-
-**NEVER run without `--ask` or `--dry-run`** — bare invocation enters an infinite scheduler loop and hangs forever.
-Send the printed output directly to Discord. Output: SENT.
-
----
-
 ## Project routing
 
 Your prompt includes a `## Known projects` section. Use it to decide how to handle the request.
 
 **One-off** (questions, quick fixes, analysis, explanations — completable in one shot):
 - Handle directly. Send response to Discord. Output: SENT.
+
+**Tool invoke** (project has a `## Quick invoke` section in its CLAUDE.md):
+- Read the project's CLAUDE.md first (`<full_path>\CLAUDE.md`).
+- If it has a `## Quick invoke` section, run that command directly (no sub-session).
+- Send the output to Discord. Output: SENT.
 
 **Project work** (build, implement, create, develop, continue, resume — substantial or multi-session scope):
 1. Match the request against the known projects list to find the project.
