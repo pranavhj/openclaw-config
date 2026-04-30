@@ -32,3 +32,6 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-024](issues/OC-024-non-elevated-service-restart.md) | feature | fixed | Non-elevated service restart — grant-user DACL action + restart-bot.py so Claude can restart bot without admin | `feat(OC-024)` |
 | [OC-025](issues/OC-025-sub-agent-prompt-truncation-and-status-edit-bug.md) | bug | fixed | Sub-agent gets only `"## Reply"` (cmd.exe newline truncation) + status "Done" edit never fires (wrong discord.py API + client.close() doesn't exit) | `fix(OC-025)` |
 | [OC-026](issues/OC-026-quota-optimization.md) | feature | fixed | Quota optimization: stateless Haiku routing (remove --continue + sonnet→haiku) + lower compaction threshold (400→100KB, 5→3 pairs) | `feat(OC-026)` |
+| [OC-027](issues/OC-027-nssm-service-logon-failure.md) | bug | open | NSSM discord-bot service fails to start — stale `.\prana` account password, cannot fix without admin | — |
+| [OC-028](issues/OC-028-ubuntu-vm-shadow-agent.md) | bug | fixed | Ubuntu_openclaw VM was silently handling Discord messages via SSH to Windows, conflicting with Windows pipeline | `docs(misc)` |
+| [OC-029](issues/OC-029-flightchecker-infinite-loop.md) | bug | fixed | flightchecker invoked without --once entered infinite scheduler loop, hung delegate indefinitely | `feat(misc)` |
