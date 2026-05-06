@@ -26,6 +26,7 @@ SESSION_RESET_PY = SCRIPT_DIR / 'session-reset.py'
 
 LOGDIR = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'openclaw'
 ACTIVE_SESSION_FILE = LOGDIR / 'active-session.json'
+STOP_SIGNAL_FILE = LOGDIR / 'stop.signal'
 WORK_DIR = Path.home() / 'projects' / 'openclaw'
 
 
@@ -280,25 +281,64 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     # passing multi-line strings via shell=True on Windows.
     prompt_file = LOGDIR / f'delegate-prompt-{ts_recv.replace(":", "-").replace(".", "-")}.txt'
     prompt_file.write_text(prompt, encoding='utf-8')
+
+    # Clean up any stale stop signal from previous run
     try:
-        result = subprocess.run(
+        STOP_SIGNAL_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    try:
+        proc = subprocess.Popen(
             [sys.executable, str(AGENT_SMART_PY),
              '--permission-mode', 'bypassPermissions',
+             '--max-turns', '40',
              '--model', 'haiku', '--print-file', str(prompt_file)],
             cwd=str(WORK_DIR),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding='utf-8',
             errors='replace',
             env=agent_env,
         )
+
+        # Poll for stop signal while process runs
+        while proc.poll() is None:
+            if STOP_SIGNAL_FILE.exists():
+                ts_stop = ts_ms()
+                tl({'ts': ts_stop, 'event': 'stop_signal_detected'})
+                log('stop signal detected — terminating agent')
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                break
+            time.sleep(0.5)
+
+        stdout, stderr = proc.communicate(timeout=5)
+        exit_code = proc.returncode
+        output = (stdout or '') + (stderr or '')
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate()
+        exit_code = proc.returncode
+        output = (stdout or '') + (stderr or '') + '\n[timeout]'
+    except Exception as e:
+        output = f'[error spawning agent: {e}]'
+        exit_code = 1
     finally:
         try:
             prompt_file.unlink(missing_ok=True)
         except Exception:
             pass
-    exit_code = result.returncode
-    output = (result.stdout or '') + (result.stderr or '')
+        try:
+            STOP_SIGNAL_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     duration_ms = int((time.monotonic() - t_agent) * 1000)
     ts_agent_done = ts_ms()
 
@@ -325,8 +365,13 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         ts_fail = ts_ms()
         tl({'ts': ts_fail, 'event': 'failure_detected', 'exit_code': exit_code,
             'output_preview': output[:100].replace('\n', ' ')})
-        discord_send(channel, target,
-                     f'Delegation failed (exit {exit_code}). Please try again.\n-# sent by delegate')
+        # Don't send error message if we stopped intentionally
+        if not (exit_code == -15 or exit_code == 143):  # SIGTERM exit codes
+            discord_send(channel, target,
+                         f'Delegation failed (exit {exit_code}). Please try again.\n-# sent by delegate')
+        else:
+            discord_send(channel, target,
+                         'Execution stopped.\n-# sent by delegate')
         ts_notify = ts_ms()
         tl({'ts': ts_notify, 'event': 'failure_notified', 'notify_exit': 0})
         log(f'failure_notified at {ts_notify}')

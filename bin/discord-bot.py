@@ -264,6 +264,19 @@ async def on_message(message):
         return
 
     content = message.content.replace('\n', ' ')
+
+    # Handle "stop" command
+    if content.strip().lower() == 'stop':
+        try:
+            stop_signal = LOGDIR / 'stop.signal'
+            stop_signal.write_text('1', encoding='utf-8')
+            log.info('stop signal written')
+            await message.reply('Stopping current execution…')
+        except Exception as e:
+            log.error('stop signal failed: %s', e)
+            await message.reply(f'Failed to stop: {e}')
+        return
+
     env = None  # inherit environment; claude is already in PATH
 
     # Download attachments if any
