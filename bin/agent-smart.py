@@ -104,6 +104,11 @@ def main():
     session_dir = Path.home() / '.claude' / 'projects' / cwd_key
     maybe_compact(session_dir, keep_pairs)
 
+    # Timeout for Claude execution (default 20 minutes = 1200 seconds).
+    # Can be overridden via CLAUDE_TIMEOUT environment variable.
+    import os
+    claude_timeout = int(os.environ.get('CLAUDE_TIMEOUT', '1200'))
+
     # --print-file <path>: read prompt from file and pass via --print.
     # Used by delegate.py on Windows to avoid cmd.exe newline-splitting
     # when multi-line prompts are passed as a command-line argument.
@@ -118,14 +123,19 @@ def main():
         # We pass it via stdin with --print flag omitted, relying on stdin pipe.
         claude_args = ['claude'] + args
         shell = sys.platform == 'win32'
-        result = subprocess.run(
-            claude_args,
-            input=prompt,
-            text=True,
-            encoding='utf-8',
-            shell=shell,
-        )
-        sys.exit(result.returncode)
+        try:
+            result = subprocess.run(
+                claude_args,
+                input=prompt,
+                text=True,
+                encoding='utf-8',
+                shell=shell,
+                timeout=claude_timeout,
+            )
+            sys.exit(result.returncode)
+        except subprocess.TimeoutExpired:
+            print(f'[agent-smart] Claude process timeout after {claude_timeout}s — session interrupted')
+            sys.exit(124)  # Standard timeout exit code
 
     # On Windows, cmd.exe truncates --print "value" at the first newline.
     # Intercept --print <value> and pass via stdin instead.
@@ -133,20 +143,29 @@ def main():
         idx = args.index('--print')
         prompt = args[idx + 1]
         args = args[:idx] + args[idx + 2:]
-        result = subprocess.run(
-            ['claude'] + args,
-            input=prompt,
-            text=True,
-            encoding='utf-8',
-            shell=True,
-        )
-        sys.exit(result.returncode)
+        try:
+            result = subprocess.run(
+                ['claude'] + args,
+                input=prompt,
+                text=True,
+                encoding='utf-8',
+                shell=True,
+                timeout=claude_timeout,
+            )
+            sys.exit(result.returncode)
+        except subprocess.TimeoutExpired:
+            print(f'[agent-smart] Claude process timeout after {claude_timeout}s — session interrupted')
+            sys.exit(124)
 
     # On Windows, claude is a .cmd file that requires cmd.exe to execute.
     # shell=True lets Python invoke it through cmd.exe automatically.
     shell = sys.platform == 'win32'
-    result = subprocess.run(['claude'] + args, shell=shell)
-    sys.exit(result.returncode)
+    try:
+        result = subprocess.run(['claude'] + args, shell=shell, timeout=claude_timeout)
+        sys.exit(result.returncode)
+    except subprocess.TimeoutExpired:
+        print(f'[agent-smart] Claude process timeout after {claude_timeout}s — session interrupted')
+        sys.exit(124)
 
 
 if __name__ == '__main__':

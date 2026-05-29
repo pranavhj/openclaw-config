@@ -366,7 +366,11 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         tl({'ts': ts_fail, 'event': 'failure_detected', 'exit_code': exit_code,
             'output_preview': output[:100].replace('\n', ' ')})
         # Don't send error message if we stopped intentionally
-        if not (exit_code == -15 or exit_code == 143):  # SIGTERM exit codes
+        if exit_code == 124:  # Timeout exit code
+            tl({'ts': ts_fail, 'event': 'timeout_detected', 'limit_seconds': 1200})
+            discord_send(channel, target,
+                         'Session timed out (20min limit). Please send your request again.\n-# sent by delegate')
+        elif not (exit_code == -15 or exit_code == 143):  # SIGTERM exit codes
             discord_send(channel, target,
                          f'Delegation failed (exit {exit_code}). Please try again.\n-# sent by delegate')
         else:
