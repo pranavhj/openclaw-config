@@ -114,6 +114,17 @@ Commit format: `<type>(<scope>): <description>`
 - type: `fix` | `feat` | `config` | `sync` | `docs` | `misc`
 - scope: `OC-NNN` (issue ID) or `sync` | `misc` | `docs`
 
+### GitHub CLI (gh)
+
+`gh` is installed and authenticated. Use it for all GitHub operations:
+- **Path:** `"C:\Program Files\GitHub CLI\gh.exe"` (or just `gh` if PATH is updated)
+- **Push / general git:** use `git` as normal — credentials are stored in Windows Credential Manager
+- **Actions logs:** `gh run list --repo pranavhj/<repo>` and `gh run view <run-id> --repo pranavhj/<repo> --log-failed`
+- **Create repo:** `gh repo create pranavhj/<name> --public --source=. --push`
+- **PR / issues:** `gh pr create`, `gh issue list`, etc.
+
+Always use `gh` instead of raw `curl` for GitHub API calls.
+
 Check open issues before diagnosing: `type D:\MyData\Software\openclaw-config\ISSUES.md`
 
 ### Known failure patterns
