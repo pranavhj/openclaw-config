@@ -60,6 +60,7 @@ Your prompt includes a `## Known projects` section. Use it to decide how to hand
    If no match → new project, pick a short slug and use `C:\Users\prana\projects\<slug>`.
    Skip `openclaw` — that's this dir, not a user project.
 2. Use the full path from the list. Ensure it exists: `mkdir <full_path>` (for new projects).
+   **For new projects, also create CLAUDE.md** with project instructions (see template below).
 3. Spawn an isolated project sub-session and let it handle delivery:
 
 ```
@@ -121,3 +122,42 @@ Check open issues before diagnosing: `type D:\MyData\Software\openclaw-config\IS
 - **delegate lock stuck** → `rmdir %LOCALAPPDATA%\openclaw\delegate.lock` to clear manually
 - **discord-bot.py not receiving messages** → `nssm status discord-bot`; verify Message Content Intent enabled
 - **Empty message content** → Message Content Intent not enabled in Discord Developer Portal
+
+## New Project Template
+
+When creating a new project, use this CLAUDE.md template (customize as needed):
+
+```markdown
+# Project sub-session
+
+You are running inside a project directory. Your job is to do the work here — do NOT do project detection or spawn further sub-sessions.
+
+1. If `PROGRESS.md` exists, skim it for current state
+2. Do the work (create/edit files in this directory)
+3. Update `PROGRESS.md` to reflect latest state
+4. Send response to Discord (see parent CLAUDE.md for send command and format)
+5. Output: SENT
+
+PROGRESS.md is a SHORT state bookmark (~10-20 lines):
+
+\`\`\`
+# <Project Name>
+
+## State
+Currently: <what's in progress right now>
+Last session: <date>
+
+## Done
+- <completed items>
+
+## Next
+- <planned items>
+
+## Key decisions
+- <tech choices, constraints worth remembering>
+\`\`\`
+
+On first run: create PROGRESS.md with the project goal and initial state.
+```
+
+For projects with special setup, add relevant sections (e.g., build instructions, tech stack, architecture notes).
