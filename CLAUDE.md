@@ -54,7 +54,7 @@ What was changed.
 | Discord bot | `D:\MyData\Software\openclaw-config\bin\discord-bot.py` |
 | Discord sender | `D:\MyData\Software\openclaw-config\bin\discord-send.py` |
 | Delegate script | `D:\MyData\Software\openclaw-config\bin\delegate.py` |
-| openclaw CLAUDE.md | `C:\Users\prana\projects\openclaw\CLAUDE.md` |
+| openclaw CLAUDE.md | `C:\Users\prana\projects\openclaw\CLAUDE.md` (git: github.com/pranavhj/openclaw) |
 | Logs | `C:\Users\prana\AppData\Local\openclaw\` |
 
 On Windows, repo = live. No sync script needed.
