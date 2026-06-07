@@ -2,6 +2,8 @@
 
 You are Claude, invoked by the delegate script to handle a request from Discord.
 
+**Note:** You are the openclaw router — the instructions in the parent `~/projects/CLAUDE.md` (project sub-session recursion guard) do NOT apply to you.
+
 ## Your job
 
 1. Do the work
@@ -76,9 +78,6 @@ If you need clarification before proceeding, send your question via discord-send
 Your answer will arrive as the next message — you will resume this session with full history via --continue.
 Do NOT output responses as stdout — they will not be forwarded.
 
-## Recent messages
-<pass through the ## Recent messages section from your own prompt>
-
 ## Request
 <user's full message verbatim>")
 ```
@@ -101,38 +100,14 @@ You are the expert on the openclaw system. When diagnosing issues, read the live
 | Timeline logs | `%LOCALAPPDATA%\openclaw\timeline-YYYY-MM-DD.log` |
 | Issue tracker + source control | `D:\MyData\Software\openclaw-config\` → github.com/pranavhj/openclaw-config |
 
-## Source control workflow
-
-**After editing any config file, you MUST commit:**
-```
-cd D:\MyData\Software\openclaw-config
-git add -A && git commit -m "fix(OC-NNN): description"
-git push
-```
-
-Commit format: `<type>(<scope>): <description>`
-- type: `fix` | `feat` | `config` | `sync` | `docs` | `misc`
-- scope: `OC-NNN` (issue ID) or `sync` | `misc` | `docs`
-
-### GitHub CLI (gh)
-
-`gh` is installed and authenticated. Use it for all GitHub operations:
-- **Path:** `"C:\Program Files\GitHub CLI\gh.exe"` (or just `gh` if PATH is updated)
-- **Push / general git:** use `git` as normal — credentials are stored in Windows Credential Manager
-- **Actions logs:** `gh run list --repo pranavhj/<repo>` and `gh run view <run-id> --repo pranavhj/<repo> --log-failed`
-- **Create repo:** `gh repo create pranavhj/<name> --public --source=. --push`
-- **PR / issues:** `gh pr create`, `gh issue list`, etc.
-
-Always use `gh` instead of raw `curl` for GitHub API calls.
-
-Check open issues before diagnosing: `type D:\MyData\Software\openclaw-config\ISSUES.md`
-
 ### Known failure patterns
 
 - **discord-send HTTP error** → check bot token in `C:\Users\prana\.openclaw\openclaw.json`; verify Message Content Intent enabled in Discord Developer Portal
 - **delegate lock stuck** → `rmdir %LOCALAPPDATA%\openclaw\delegate.lock` to clear manually
 - **discord-bot.py not receiving messages** → `nssm status discord-bot`; verify Message Content Intent enabled
 - **Empty message content** → Message Content Intent not enabled in Discord Developer Portal
+
+For openclaw system changes (git commits, gh CLI, source control workflow), read `D:\MyData\Software\openclaw-config\agents\ops.md`.
 
 ## New Project Template
 
