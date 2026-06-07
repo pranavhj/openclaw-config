@@ -1,5 +1,5 @@
 # openclaw System Architecture
-_Last updated: 2026-04-29 (VM removal, haiku routing, Quick invoke convention)_
+_Last updated: 2026-06-07 (router CLAUDE.md deployed, ops.md split, recent-messages passthrough removed, --continue verified)_
 
 ---
 
@@ -106,12 +106,15 @@ _Last updated: 2026-04-29 (VM removal, haiku routing, Quick invoke convention)_
 │  Model: claude-haiku-4-5 (--model haiku, stateless, OC-026)     │
 │  Working dir: C:\Users\prana\projects\openclaw\                  │
 │  Config: C:\Users\prana\projects\openclaw\CLAUDE.md              │
+│    ↳ Repo: github.com/pranavhj/openclaw                          │
+│    ↳ Git backup: agents/openclaw-CLAUDE.md in openclaw-config    │
+│    ↳ Overrides ~/projects/CLAUDE.md recursion guard              │
 │  Session: stateless (no --continue — fresh context each call)    │
 │                                                                  │
 │  Receives prompt with:                                           │
 │    ## Reply  (channel + target for response delivery)            │
 │    ## Known projects (name + full path, multi-root scan)         │
-│    ## Recent messages (last 5, tagged by project)                │
+│    ## Recent messages (last 4, tagged by project — routing ctx)  │
 │    ## Request (user's full message verbatim)                     │
 │    ## Attachments (paths if files were uploaded)                 │
 │                                                                  │
@@ -151,9 +154,11 @@ _Last updated: 2026-04-29 (VM removal, haiku routing, Quick invoke convention)_
          │              │  Model: sonnet              │
          │              │  Session: --continue        │
          │              │                             │
-         │              │  Config: inherits from      │
-         │              │  ~/projects/CLAUDE.md       │
+         │              │  Config: project CLAUDE.md  │
+         │              │  + ~/projects/CLAUDE.md     │
          │              │  (recursion guard)          │
+         │              │  No ## Recent messages —    │
+         │              │  --continue has full history│
          │              │                             │
          │              │  • Reads PROGRESS.md        │
          │              │  • Does the work            │
@@ -266,21 +271,24 @@ C:\Users\prana\projects\
 ├── CLAUDE.md                        <- PROJECT SUB-SESSION GUARD
 │   • "You're in a project dir -- do the work, don't spawn sub-sessions"
 │
-└── openclaw\
-    └── CLAUDE.md                    <- OPENCLAW_CLAUDE CONFIG
+└── openclaw\                        <- git repo: github.com/pranavhj/openclaw
+    └── CLAUDE.md                    <- OPENCLAW_CLAUDE CONFIG (live, versioned)
+        • Overrides parent ~/projects/CLAUDE.md recursion guard
         • Job: do work, send via discord-send.py, output SENT
         • User profile, Discord format, watermark
         • Project routing: one-off / tool invoke / sub-session
         • Quick invoke: read project CLAUDE.md for ## Quick invoke section
         • Sub-session spawn: (unset CLAUDECODE; cd <path> && claude ...)
+        • For system changes: read agents/ops.md (git, gh CLI)
 
 D:\MyData\Software\openclaw-config\  <- THIS REPO (live = repo)
     config/openclaw.json             <- sanitized (secrets as ${VAR})
     bin/discord-bot.py, discord-send.py, delegate.py, agent-smart.py
     bin/bot-logs.py, route-audit.py, run-tests.py, session-reset.py
     bin/restart-bot.py               <- sc stop + Start-Process restart
-    agents/openclaw-CLAUDE.md        <- canonical copy of openclaw/CLAUDE.md
+    agents/openclaw-CLAUDE.md        <- git backup of ~/projects/openclaw/CLAUDE.md
     agents/projects-CLAUDE.md        <- canonical copy of ~/projects/CLAUDE.md
+    agents/ops.md                    <- source control + gh CLI (read on demand)
     docs/openclaw-architecture.md    <- this file
 
 NSSM service (discord-bot):
@@ -367,6 +375,26 @@ The openclaw routing agent runs as haiku with no `--continue`. Each delegation i
 context. This is cheap and fast for routing. Heavy project work is delegated to sonnet
 sub-sessions with `--continue` that accumulate history only within the project scope.
 
+**Router CLAUDE.md deployed to ~/projects/openclaw/ (2026-06-07)**
+Previously `~/projects/openclaw/CLAUDE.md` did not exist. The router was working purely
+off the prompt, and also reading `~/projects/CLAUDE.md` (the recursion guard) which
+explicitly says "do NOT spawn sub-sessions" — conflicting with its actual job.
+The fix: deploy `agents/openclaw-CLAUDE.md` as the live file at `~/projects/openclaw/CLAUDE.md`,
+with an explicit override note for the recursion guard. The directory is now a git repo at
+`github.com/pranavhj/openclaw`. Git backup still kept at `agents/openclaw-CLAUDE.md`.
+
+**Recent messages not passed to sub-sessions (2026-06-07)**
+The router prompt includes `## Recent messages` (last 4 exchanges) for routing context —
+essential for resolving references like "fix the above" or "continue that". Previously
+this was also passed through to sub-sessions via the spawn `--print` content. Removed:
+sub-sessions have the full conversation via `--continue` JSONL history, making the
+passthrough redundant noise.
+
+**ops.md split from router CLAUDE.md (2026-06-07)**
+Source control workflow and gh CLI instructions moved to `agents/ops.md`. The router
+reads it only when making openclaw system changes (rare). This reduces Haiku's prompt
+size on every single message by ~30 lines.
+
 **Quick invoke convention**
 Tool projects (flightchecker, etc.) that are run-and-return declare a `## Quick invoke`
 section in CLAUDE.md. The router reads this and runs the command directly, avoiding a
@@ -446,6 +474,7 @@ But a machine reboot mid-delegation would still kill in-flight work.
 | Unit tests | `tests/test_delegate.py` | 91 | Script presence, imports, lock, sanitization, timeline events, failure notification, CLAUDECODE stripping, recursion guard |
 | Integration tests | `tests/test_integration.py` | 28 | Live delegation, lock dedup, discord-send, timeline validation, config, sub-session isolation |
 | Behavior tests | `tests/test_claude_behavior.py` | 12 | Claude response quality: watermark, format, routing (requires live token) |
+| Continue session | `tests/test_continue_session.py` | 1 | Verifies `--continue` preserves session history across sub-session invocations. Run standalone. |
 | Runner | `tests/run-tests.py` | -- | Runs all 3 suites, optional --discord summary |
 | Daily audit | `bin/route-audit.py` | -- | Log analysis via Claude Sonnet: routing health, failure patterns, bot health |
 
