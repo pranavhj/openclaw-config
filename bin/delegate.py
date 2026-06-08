@@ -6,6 +6,7 @@ Usage: python delegate.py CHANNEL TARGET MESSAGE...
   TARGET   — Discord channel ID to reply to
   MESSAGE  — message text (remaining args joined with spaces)
 """
+import glob
 import io
 import json
 import os
@@ -28,11 +29,57 @@ LOGDIR = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'openclaw'
 ACTIVE_SESSION_FILE = LOGDIR / 'active-session.json'
 STOP_SIGNAL_FILE = LOGDIR / 'stop.signal'
 WORK_DIR = Path.home() / 'projects' / 'openclaw'
+CLAUDE_PROJECTS_DIR = os.path.expanduser('~/.claude/projects')
 
 
 def ts_ms() -> str:
     now = datetime.now(timezone.utc)
     return now.strftime('%Y-%m-%dT%H:%M:%S.') + f'{now.microsecond // 1000:03d}Z'
+
+
+def _extract_last_reply(max_chars=500) -> str:
+    """Find the most recently modified JSONL in Claude projects dir and extract the last assistant text."""
+    try:
+        jsonl_files = glob.glob(f'{CLAUDE_PROJECTS_DIR}/**/*.jsonl', recursive=True)
+        if not jsonl_files:
+            return ''
+        # Find most recently modified
+        newest = max(jsonl_files, key=os.path.getmtime)
+        # Read last ~20KB to find last assistant text (avoid reading huge files)
+        size = os.path.getsize(newest)
+        with open(newest, 'rb') as f:
+            if size > 20480:
+                f.seek(size - 20480)
+            data = f.read().decode('utf-8', errors='replace')
+        # Parse lines in reverse to find last assistant text
+        lines = data.splitlines()
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                msg = entry.get('message', {})
+                if msg.get('role') != 'assistant':
+                    continue
+                content = msg.get('content', [])
+                if isinstance(content, str):
+                    return content[:max_chars]
+                if isinstance(content, list):
+                    # Collect all text blocks from this message
+                    texts = []
+                    for c in content:
+                        if isinstance(c, dict) and c.get('type') == 'text':
+                            t = c.get('text', '').strip()
+                            if t:
+                                texts.append(t)
+                    if texts:
+                        return ' '.join(texts)[:max_chars]
+            except (json.JSONDecodeError, AttributeError):
+                continue
+    except Exception:
+        pass
+    return ''
 
 
 def discord_send(channel: str, target: str, message: str) -> int:
@@ -45,8 +92,8 @@ def discord_send(channel: str, target: str, message: str) -> int:
 
 
 def parse_history(log_lines: list) -> str:
-    """Parse timeline JSONL lines and return formatted last 5 request entries."""
-    entries = []
+    """Parse timeline JSONL lines and return formatted last 5 request+reply pairs."""
+    entries = []  # list of (proj, user_msg, reply_preview)
     i = 0
     while i < len(log_lines):
         try:
@@ -54,20 +101,29 @@ def parse_history(log_lines: list) -> str:
             if e.get('event') == 'delegate_recv':
                 msg = e.get('msg_preview', '')[:300]
                 proj = 'openclaw'
-                for j in range(i + 1, min(i + 5, len(log_lines))):
+                reply = ''
+                for j in range(i + 1, min(i + 20, len(log_lines))):
                     try:
                         n = json.loads(log_lines[j].strip())
                         if n.get('event') == 'project_match':
                             proj = n.get('project', 'openclaw')
-                            break
+                        elif n.get('event') == 'delegate_reply':
+                            reply = n.get('reply_preview', '')
+                        elif n.get('event') == 'delegate_recv':
+                            break  # next request, stop scanning
                     except Exception:
                         pass
-                entries.append((proj, msg))
+                entries.append((proj, msg, reply))
         except Exception:
             pass
         i += 1
     recent = entries[-5:-1] if len(entries) >= 2 else entries[:-1]
-    return '\n'.join(f'- [{proj}] {msg}' for proj, msg in recent)
+    lines = []
+    for proj, msg, reply in recent:
+        lines.append(f'- [{proj}] User: {msg}')
+        if reply:
+            lines.append(f'  Claude: {reply}')
+    return '\n'.join(lines)
 
 
 def main():
@@ -354,6 +410,12 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     log(f'--- agent output ---\n{output[:2000]}')
     tl({'ts': ts_agent_done, 'event': 'agent_done', 'exit_code': exit_code,
         'duration_ms': duration_ms, 'output_preview': output[:60].replace('\n', ' ')})
+
+    # Extract and log Claude's reply from the JSONL session file
+    reply_preview = _extract_last_reply(max_chars=300)
+    if reply_preview:
+        tl({'ts': ts_ms(), 'event': 'delegate_reply',
+            'reply_preview': reply_preview.replace('\n', ' ')})
 
     # --- Cleanup downloaded attachments ---
     if attachments_env:
