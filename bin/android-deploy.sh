@@ -105,4 +105,4 @@ echo "Installing $APK on $DEVICE..."
 }
 
 # Cleanup CI temp dir
-[[ -n "$CI_REPO" ]] && rm -rf "$TMP_DIR"
+if [[ -n "$CI_REPO" ]]; then rm -rf "$TMP_DIR"; fi

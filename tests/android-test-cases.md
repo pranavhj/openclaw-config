@@ -5,7 +5,7 @@ Run automated tests: `bash tests/run-android-tests.sh`
 
 **Status codes:** `PASS` | `FAIL` | `PENDING` | `MANUAL` | `SKIP`
 
-Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); manual tests pending
+Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); live device: D9/D11/D12/D13/D19/L9/N30/N31 PASS
 
 ---
 
@@ -74,8 +74,8 @@ Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); manual tests pending
 ### Build verification
 | ID | Test | Status | Notes |
 |----|------|--------|-------|
-| N30 | ./gradlew assembleDebug on scaffolded project succeeds (JAVA_HOME set, local.properties present) | PENDING | Long — ~2min |
-| N31 | APK produced at app/build/outputs/apk/debug/app-debug.apk | PENDING | Depends on N30 |
+| N30 | ./gradlew assembleDebug on scaffolded project succeeds (JAVA_HOME set, local.properties present) | PASS | ~30s build; n30app slug |
+| N31 | APK produced at app/build/outputs/apk/debug/app-debug.apk | PASS | Confirmed after N30 |
 
 ---
 
@@ -100,11 +100,11 @@ Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); manual tests pending
 ### Local build path (requires device)
 | ID | Test | Status | Notes |
 |----|------|--------|-------|
-| D9 | adb connect called before build | MANUAL | Check script output |
+| D9 | adb connect called before build | PASS | Line 59 (connect) < line 87 (gradlew) |
 | D10 | Unreachable device → "not reachable" error, exits non-zero | MANUAL | Disconnect device to test |
-| D11 | Build failure (bad JAVA_HOME) → "Build failed.", exits non-zero | MANUAL | |
-| D12 | Successful build → APK at app/build/outputs/apk/debug/app-debug.apk | MANUAL | |
-| D13 | adb install -r called with -s <device> flag | MANUAL | |
+| D11 | Build failure (bad JAVA_HOME) → "Build failed.", exits non-zero | PASS | Confirmed exit 1 |
+| D12 | Successful build → APK at app/build/outputs/apk/debug/app-debug.apk | PASS | Bug #4 fix (exit code); live install confirmed |
+| D13 | adb install -r called with -s <device> flag | PASS | Script line 98 + live output confirmed |
 | D14 | Signature mismatch → uninstall then reinstall | MANUAL | Requires prior install with different key |
 
 ### CI path (requires GitHub Actions run)
@@ -239,3 +239,4 @@ Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); manual tests pending
 | BUG-1 | logs-crash used `--mode crash --mode dump` — last --mode wins, crash filter silently dropped | Added `--dump` boolean flag to android-logs.sh; fixed TableNew CLAUDE.md and android-new.sh template | FIXED |
 | BUG-2 | android-new.sh did not create local.properties — new project builds fail with "SDK location not found" | android-new.sh now writes local.properties with sdk.dir | FIXED |
 | BUG-3 | Router mapped all log requests including "crash" to logs-dump (default filter) | Added separate logs-crash row in routing table pointing to crash-filter+dump | FIXED |
+| BUG-4 | android-deploy.sh exits 1 even on successful local deploy — `[[ -n "$CI_REPO" ]] && rm ...` last line returns 1 (empty var) with `set -e` | Changed to `if [[ -n "$CI_REPO" ]]; then rm ...; fi` | FIXED |
