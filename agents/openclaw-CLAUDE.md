@@ -56,6 +56,11 @@ Your prompt includes a `## Known projects` section. Use it to decide how to hand
 - If it has a `## Quick invoke` section, run that command directly (no sub-session).
 - Send the output to Discord. Output: SENT.
 
+**Android projects** — detected by presence of `gradlew` + `app/build.gradle` or `AndroidManifest.xml` in the project dir.
+- For build/deploy/logs requests: use Tool invoke path — read project CLAUDE.md, run `## Quick invoke` command directly.
+- For code changes: use Project work path — spawn sub-session.
+- For new Android projects: run `bash /d/MyData/Software/openclaw-config/bin/android-new.sh --slug <slug> --dest <path>`, then add CLAUDE.md from the Android template below. Read `D:\MyData\Software\openclaw-config\agents\android.md` for full toolchain reference.
+
 **Project work** (build, implement, create, develop, continue, resume — substantial or multi-session scope):
 1. Match the request against the known projects list to find the project.
    The list format is: `Name (C:\full\path\to\project)`
@@ -147,3 +152,107 @@ On first run: create PROGRESS.md with the project goal and initial state.
 ```
 
 For projects with special setup, add relevant sections (e.g., build instructions, tech stack, architecture notes).
+
+## New Android Project Template
+
+When creating a new Android project, use this CLAUDE.md template (replace `<slug>`, `<AppTag>`,
+`<package>`, `<github-repo>`, and optionally `<server>` with project-specific values):
+
+```markdown
+# <AppTag> — Android sub-session
+
+You are running inside the <AppTag> Android project. Do NOT do project detection or spawn sub-sessions.
+
+## Sub-session rules
+1. Skim `PROGRESS.md` for current state
+2. Do the work (edit files in this directory)
+3. Update `PROGRESS.md`
+4. Send response via `discord-send.py`
+5. Output: SENT
+
+Send using:
+\`\`\`
+python D:\MyData\Software\openclaw-config\bin\discord-send.py --target <target> --message "<text>"
+\`\`\`
+
+---
+
+## Paths
+
+| What | Path |
+|------|------|
+| ADB | `/c/Users/prana/AppData/Local/Android/Sdk/platform-tools/adb.exe` |
+| JAVA_HOME | `/c/Users/prana/jdk17/jdk-17.0.19+10` |
+| GitHub CLI | `/c/Program Files/GitHub CLI/gh.exe` |
+| android-deploy | `D:\MyData\Software\openclaw-config\bin\android-deploy.sh` |
+| android-logs | `D:\MyData\Software\openclaw-config\bin\android-logs.sh` |
+| discord-send | `D:\MyData\Software\openclaw-config\bin\discord-send.py` |
+
+---
+
+## Device
+
+- **Tailscale (stable):** `100.122.101.27:5555` ← always use this
+- **Local (may change):** `10.0.0.122:5555`
+
+---
+
+## Project
+
+- **Package:** `com.example.<slug>`
+- **GitHub repo:** `pranavhj/<github-repo>`
+- **Source:** `app/src/main/java/com/example/<slug>/`
+
+---
+
+## Quick invoke
+
+\`\`\`bash
+# build only
+export JAVA_HOME="/c/Users/prana/jdk17/jdk-17.0.19+10" && ./gradlew assembleDebug --quiet
+
+# deploy (local build → install on phone)
+bash /d/MyData/Software/openclaw-config/bin/android-deploy.sh \
+  --project <full-project-path> \
+  --device 100.122.101.27:5555
+
+# deploy-ci (GitHub Actions artifact → install on phone)
+bash /d/MyData/Software/openclaw-config/bin/android-deploy.sh \
+  --project <full-project-path> \
+  --device 100.122.101.27:5555 \
+  --ci pranavhj/<github-repo>
+
+# logs-dump (snapshot — use for Discord output)
+bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \
+  --tag <AppTag> --device 100.122.101.27:5555 --mode dump
+
+# logs (streaming — interactive only, not Discord)
+bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \
+  --tag <AppTag> --device 100.122.101.27:5555
+
+# adb-connect
+/c/Users/prana/AppData/Local/Android/Sdk/platform-tools/adb.exe connect 100.122.101.27:5555
+\`\`\`
+
+---
+
+## Stack
+
+- **Language:** Java (source/target compat 1.8, build JDK 17)
+- **AGP:** 8.2.2 | **Gradle:** 8.2 | **minSdk:** 24 | **targetSdk/compileSdk:** 34
+- **Debug keystore:** `debug.keystore` in project root (storepass=android, alias=androiddebugkey)
+
+---
+
+## Common errors
+
+| Error | Fix |
+|-------|-----|
+| Build fails — Java version | `export JAVA_HOME="/c/Users/prana/jdk17/jdk-17.0.19+10"` |
+| `adb: device offline` | `adb disconnect 100.122.101.27:5555 && adb connect 100.122.101.27:5555` |
+| Signature mismatch on install | `android-deploy.sh` handles automatically |
+| `NetworkOnMainThreadException` | All network calls must be on background thread |
+
+## Full troubleshooting
+Read `D:\MyData\Software\openclaw-config\agents\android.md`
+```
