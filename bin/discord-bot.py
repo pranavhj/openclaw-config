@@ -180,11 +180,14 @@ async def _edit_status(session, elapsed_s, done=False, cancelled=False):
         header = f'\U0001f504 Working\u2026 `{elapsed_s}s` \u00b7 {project}'
     lines = [header]
     for ev in list(_status_events)[-6:]:
-        icon = TOOL_ICONS.get(ev['tool'], '\u2699\ufe0f')
         detail = ev['detail']
         if len(detail) > 90:
             detail = detail[:87] + '\u2026'
-        lines.append(f'-# {icon} {ev["tool"]} `{detail}`')
+        if ev.get('type') == 'text':
+            lines.append(f'-# \U0001f4ac {detail}')
+        else:
+            icon = TOOL_ICONS.get(ev.get('tool', ''), '\u2699\ufe0f')
+            lines.append(f'-# {icon} {ev["tool"]} `{detail}`')
     try:
         ch = client.get_partial_messageable(channel_id)
         await ch.get_partial_message(message_id).edit(content='\n'.join(lines))
@@ -283,15 +286,26 @@ async def watch_claude_sessions():
                         entry = json.loads(line)
                         for msg_line in format_entry(entry, project):
                             print(msg_line, flush=True)
-                            if _active_session and '[tool]' in msg_line:
-                                parts = msg_line.split('] [tool] ', 1)
-                                if len(parts) == 2:
-                                    tool_name, _, detail = parts[1].partition(': ')
-                                    _status_events.append({
-                                        'tool': tool_name.strip(),
-                                        'detail': detail.strip(),
-                                    })
-                                    _active_session['project'] = project
+                            if _active_session:
+                                _active_session['project'] = project
+                                if '[tool]' in msg_line:
+                                    parts = msg_line.split('] [tool] ', 1)
+                                    if len(parts) == 2:
+                                        tool_name, _, detail = parts[1].partition(': ')
+                                        _status_events.append({
+                                            'type': 'tool',
+                                            'tool': tool_name.strip(),
+                                            'detail': detail.strip(),
+                                        })
+                                elif '[assistant]' in msg_line:
+                                    parts = msg_line.split('] [assistant] ', 1)
+                                    if len(parts) == 2:
+                                        text = parts[1].strip()
+                                        if text:
+                                            _status_events.append({
+                                                'type': 'text',
+                                                'detail': text,
+                                            })
                     except json.JSONDecodeError:
                         pass
 
