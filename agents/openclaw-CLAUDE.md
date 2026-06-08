@@ -63,7 +63,8 @@ Tool invoke (no sub-session) — read project CLAUDE.md first, then run the matc
 |---|---|
 | deploy / install / run | `deploy` (local build → phone) |
 | deploy from CI / GitHub / Actions | `deploy-ci` (download artifact → phone) |
-| show logs / logcat / crash / errors | `logs-dump` ← **always dump, never streaming** (streaming blocks Discord) |
+| show logs / logcat / what's happening | `logs-dump` ← **always dump, never streaming** (streaming blocks Discord) |
+| show crash / exception / stacktrace | `logs-crash` ← crash-only filter + dump |
 | build only / does it compile | `build` |
 | connect ADB / device not found | `adb-connect` |
 

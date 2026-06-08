@@ -73,6 +73,9 @@ OLD_PKG_DIR="$DEST/app/src/main/java/com/example/APPSLUG"
 NEW_PKG_DIR="$DEST/app/src/main/java/com/example/$SLUG"
 [[ -d "$OLD_PKG_DIR" ]] && mv "$OLD_PKG_DIR" "$NEW_PKG_DIR"
 
+# --- Write local.properties (SDK location for CLI builds) ---
+echo 'sdk.dir=C\:\\Users\\prana\\AppData\\Local\\Android\\Sdk' > "$DEST/local.properties"
+
 # --- Generate CLAUDE.md ---
 cat > "$DEST/CLAUDE.md" <<CLAUDEMD
 # $APP_TAG — Android sub-session
@@ -140,7 +143,11 @@ bash /d/MyData/Software/openclaw-config/bin/android-deploy.sh \\
 
 # logs-dump (snapshot — use for Discord output)
 bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \\
-  --tag $APP_TAG --device 100.122.101.27:5555 --mode dump
+  --tag $APP_TAG --device 100.122.101.27:5555 --mode default --dump
+
+# logs-crash (crash-only snapshot — use for Discord crash reports)
+bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \\
+  --tag $APP_TAG --device 100.122.101.27:5555 --mode crash --dump
 
 # logs (streaming — interactive only, not Discord)
 bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \\
