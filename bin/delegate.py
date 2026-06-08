@@ -457,6 +457,21 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
             except Exception:
                 pass
 
+    # --- Fallback: forward stdout to Discord if Claude replied directly ---
+    # Sometimes Claude (especially with --continue) prints the response to stdout
+    # instead of using discord-send.py. Forward it so the user sees the full reply.
+    output_stripped = output.strip()
+    if exit_code == 0 and 'SENT' not in output and output_stripped and output_stripped not in ('', 'SENT'):
+        # Filter out agent-smart noise lines
+        reply_lines = [l for l in output_stripped.splitlines()
+                       if not l.startswith('[agent-smart]')]
+        reply_text = '\n'.join(reply_lines).strip()
+        if reply_text:
+            tl({'ts': ts_ms(), 'event': 'stdout_forward',
+                'chars': len(reply_text)})
+            discord_send(channel, target, reply_text + '\n-# sent by delegate (stdout)')
+            output = 'SENT'
+
     # --- Failure handling ---
     if exit_code != 0 and 'SENT' not in output:
         ts_fail = ts_ms()
