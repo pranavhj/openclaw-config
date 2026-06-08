@@ -124,6 +124,7 @@ def main():
 
     status_msg_id = None  # declared here so finally block can access it
 
+    _was_cancelled = False
     try:
         tl({'ts': ts_ms(), 'event': 'lock_acquired'})
         print(f'delegation started \u2014 log: {log_file}')
@@ -149,15 +150,19 @@ def main():
         except Exception:
             pass
 
-        _run(channel, target, message, today, log_file, tl_log, ts_recv, orig_len, sanitized_len, t0, tl, log)
+        _was_cancelled = _run(channel, target, message, today, log_file, tl_log, ts_recv, orig_len, sanitized_len, t0, tl, log)
     finally:
-        # Edit status message to "Done" before cleanup
+        # Edit status message to "Done" or "Cancelled" before cleanup
         if status_msg_id:
             try:
                 elapsed_s = int(time.monotonic() - t0)
+                if _was_cancelled:
+                    msg = f'\u274c Cancelled \u00b7 {elapsed_s}s'
+                else:
+                    msg = f'\u2705 Done \u00b7 {elapsed_s}s'
                 subprocess.run(
                     [sys.executable, str(DISCORD_SEND_PY), '--target', target,
-                     '--message', f'\u2705 Done \u00b7 {elapsed_s}s',
+                     '--message', msg,
                      '--edit', status_msg_id],
                     capture_output=True, text=True, timeout=5,
                 )
@@ -175,6 +180,7 @@ def main():
 
 def _run(channel, target, message, today, log_file, tl_log, ts_recv,
          orig_len, sanitized_len, t0, tl, log):
+    """Run the agent pipeline. Returns True if execution was cancelled via stop signal."""
 
     # --- Discover projects ---
     # Scan multiple roots; include full path so Claude can cd to the right dir.
@@ -289,6 +295,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     except Exception:
         pass
 
+    was_stopped = False
     try:
         proc = subprocess.Popen(
             [sys.executable, str(AGENT_SMART_PY),
@@ -310,6 +317,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
                 ts_stop = ts_ms()
                 tl({'ts': ts_stop, 'event': 'stop_signal_detected'})
                 log('stop signal detected — terminating agent')
+                was_stopped = True
                 proc.terminate()
                 try:
                     proc.wait(timeout=5)
@@ -405,6 +413,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         pass
 
     print(output)
+    return was_stopped
 
 
 if __name__ == '__main__':

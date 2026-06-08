@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import collections
 import discord
 import io
 import subprocess
@@ -40,9 +41,12 @@ LOGDIR = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'openclaw'
 ACTIVE_SESSION_FILE = LOGDIR / 'active-session.json'
 TOOL_ICONS = {
     'Bash': '\U0001f527', 'Edit': '\U0001f4dd', 'Read': '\U0001f4d6', 'Write': '\u270f\ufe0f',
-    'Glob': '\U0001f50d', 'Grep': '\U0001f50d', 'WebFetch': '\U0001f310', 'Task': '\U0001f916',
+    'Glob': '\U0001f50d', 'Grep': '\U0001f50d', 'WebFetch': '\U0001f310', 'WebSearch': '\U0001f310',
+    'Task': '\U0001f916', 'TaskCreate': '\U0001f4cb', 'TaskUpdate': '\U0001f4cb',
+    'TaskOutput': '\u23f3', 'Skill': '\u26a1', 'NotebookEdit': '\U0001f4d3',
+    'TodoWrite': '\U0001f4cb',
 }
-_status_events = []
+_status_events = collections.deque(maxlen=20)
 _last_edit_ts = 0.0
 _active_session = None
 _session_start_mono = 0.0
@@ -56,11 +60,81 @@ def project_label(filepath):
     for prefix in ['-home-pranav-projects-', '-home-pranav-']:
         if dirname.startswith(prefix):
             return dirname[len(prefix):]
-    # Windows: C--Users-prana-projects-<slug>
-    m = re.search(r'-projects-(.+)$', dirname)
-    if m:
-        return m.group(1)
+    # Windows: try known root markers (most specific first)
+    for marker in ['-AndroidStudioProjects-', '-PycharmProjects-', '-UnityProjects-',
+                   '-projects-', '-Software-']:
+        idx = dirname.find(marker)
+        if idx != -1:
+            return dirname[idx + len(marker):]
     return dirname
+
+
+def _simplify_bash(command):
+    """Strip noisy prefixes from bash commands to show the meaningful part."""
+    if not command:
+        return command
+    # Split on && and take the last meaningful segment
+    parts = command.split('&&')
+    cmd = parts[-1].strip()
+    # Strip cd, export prefixes from the last segment too
+    while cmd.startswith(('cd ', 'export ')):
+        # Find next && or ; separator
+        for sep in ['&&', ';']:
+            idx = cmd.find(sep)
+            if idx != -1:
+                cmd = cmd[idx + len(sep):].strip()
+                break
+        else:
+            break
+    # Simplify known script invocations
+    # "python /d/.../discord-send.py --target ..." → "discord-send.py"
+    # "bash /d/.../android-deploy.sh --project ..." → "android-deploy.sh --project ..."
+    m = re.match(r'(?:python3?|bash)\s+\S*?([^/\\]+\.(?:py|sh))\b(.*)', cmd)
+    if m:
+        script = m.group(1)
+        args = m.group(2).strip()
+        # For discord-send.py, just show the script name (args are noise)
+        if script == 'discord-send.py':
+            return script
+        return f'{script} {args}'.strip() if args else script
+    # "./gradlew assembleDebug" → "gradlew assembleDebug"
+    if cmd.startswith('./'):
+        cmd = cmd[2:]
+    return cmd
+
+def _extract_tool_detail(name, inp):
+    """Extract a clean, human-readable detail string for a tool invocation."""
+    if not isinstance(inp, dict):
+        return str(inp)[:100]
+    if name in ('Read', 'Write', 'Edit'):
+        fp = inp.get('file_path', '')
+        return os.path.basename(fp) if fp else str(inp)[:100]
+    if name == 'Bash':
+        return _simplify_bash(inp.get('command', str(inp)[:100]))
+    if name in ('Grep', 'Glob'):
+        return inp.get('pattern', str(inp)[:100])
+    if name == 'TaskCreate':
+        return inp.get('subject', str(inp)[:100])
+    if name == 'TaskUpdate':
+        return inp.get('subject', inp.get('status', str(inp)[:100]))
+    if name == 'TaskOutput':
+        return 'checking task status'
+    if name == 'Task':
+        return inp.get('description', str(inp)[:100])
+    if name == 'WebFetch':
+        return inp.get('url', str(inp)[:100])
+    if name == 'WebSearch':
+        return inp.get('query', str(inp)[:100])
+    if name == 'Skill':
+        return inp.get('skill', str(inp)[:100])
+    if name == 'TodoWrite':
+        todos = inp.get('todos', [])
+        if todos and isinstance(todos, list) and isinstance(todos[0], dict):
+            return todos[0].get('content', str(inp)[:100])
+        return str(inp)[:100]
+    # Fallback
+    return str(inp)[:100]
+
 
 def format_entry(entry, project):
     """Return a list of log lines for a session JSONL entry, or empty list to skip."""
@@ -84,10 +158,7 @@ def format_entry(entry, project):
             elif ct == 'tool_use':
                 name = c.get('name', '')
                 inp = c.get('input', {})
-                if isinstance(inp, dict):
-                    detail = inp.get('command', inp.get('file_path', inp.get('pattern', inp.get('query', str(inp)[:120]))))
-                else:
-                    detail = str(inp)[:120]
+                detail = _extract_tool_detail(name, inp)
                 lines.append(f'[{project}] [tool] {name}: {str(detail)[:200]}')
     elif isinstance(content, str):
         text = content.replace('\n', ' ').strip()
@@ -96,16 +167,24 @@ def format_entry(entry, project):
 
     return lines
 
-async def _edit_status(session, elapsed_s, done=False):
+async def _edit_status(session, elapsed_s, done=False, cancelled=False):
     """Edit the in-progress status message with current tool activity."""
     channel_id = int(session['target'])
     message_id = int(session['status_message_id'])
     project = session.get('project', 'openclaw')
-    header = f'{"✅ Done" if done else "🔄 Working…"} `{elapsed_s}s` · {project}'
+    if cancelled:
+        header = f'\u274c Cancelled \u00b7 `{elapsed_s}s` \u00b7 {project}'
+    elif done:
+        header = f'\u2705 Done \u00b7 `{elapsed_s}s` \u00b7 {project}'
+    else:
+        header = f'\U0001f504 Working\u2026 `{elapsed_s}s` \u00b7 {project}'
     lines = [header]
-    for ev in _status_events[-5:]:
-        icon = TOOL_ICONS.get(ev['tool'], '⚙️')
-        lines.append(f'||{icon} **{ev["tool"]}**: {ev["detail"][:80]}||')
+    for ev in list(_status_events)[-6:]:
+        icon = TOOL_ICONS.get(ev['tool'], '\u2699\ufe0f')
+        detail = ev['detail']
+        if len(detail) > 90:
+            detail = detail[:87] + '\u2026'
+        lines.append(f'-# {icon} {ev["tool"]} `{detail}`')
     try:
         ch = client.get_partial_messageable(channel_id)
         await ch.get_partial_message(message_id).edit(content='\n'.join(lines))
@@ -265,13 +344,13 @@ async def on_message(message):
 
     content = message.content.replace('\n', ' ')
 
-    # Handle "stop" command
-    if content.strip().lower() == 'stop':
+    # Handle "stop" / "cancel" command
+    if content.strip().lower() in ('stop', 'cancel'):
         try:
             stop_signal = LOGDIR / 'stop.signal'
             stop_signal.write_text('1', encoding='utf-8')
             log.info('stop signal written')
-            await message.reply('Stopping current execution…')
+            await message.reply('\u23f9\ufe0f Cancelling\u2026')
         except Exception as e:
             log.error('stop signal failed: %s', e)
             await message.reply(f'Failed to stop: {e}')
