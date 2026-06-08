@@ -261,9 +261,13 @@ async def watch_claude_sessions():
 
                 last = file_positions.get(path)
                 if last is None:
-                    # New file appeared — start tracking from current end
-                    file_positions[path] = size
-                    continue
+                    if _active_session:
+                        # Active session: new file likely from compaction — read from start
+                        file_positions[path] = 0
+                    else:
+                        # No active session: seed at current end to skip old content
+                        file_positions[path] = size
+                        continue
 
                 if size <= last:
                     continue
