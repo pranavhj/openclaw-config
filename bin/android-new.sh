@@ -195,6 +195,26 @@ bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \\
 Read \`D:\\MyData\\Software\\openclaw-config\\agents\\android.md\`
 CLAUDEMD
 
+# --- Create PROGRESS.md (makes project discoverable by delegate.py) ---
+cat > "$DEST/PROGRESS.md" <<PROGRESSMD
+# $APP_TAG
+
+## State
+Currently: scaffolded, ready for first build
+Last session: $(date +%Y-%m-%d)
+
+## Done
+- Scaffolded from android-skeleton (slug=$SLUG)
+
+## Next
+- First build + deploy to device
+- Set up GitHub repo + Actions CI
+
+## Key decisions
+- Package: $PACKAGE
+- GitHub repo: $GITHUB_REPO
+PROGRESSMD
+
 # --- Git init ---
 cd "$DEST"
 git init

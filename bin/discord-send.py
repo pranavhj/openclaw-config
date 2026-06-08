@@ -40,46 +40,71 @@ def main():
         print('discord-send: token is empty', file=sys.stderr)
         sys.exit(1)
 
-    body = json.dumps({'content': args.message}).encode('utf-8')
-    url = f'https://discord.com/api/v10/channels/{args.target}/messages'
-    if args.edit:
-        url += f'/{args.edit}'
-    method = 'PATCH' if args.edit else 'POST'
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={
-            'Authorization': f'Bot {token}',
-            'Content-Type': 'application/json',
-            'User-Agent': 'DiscordBot (https://github.com/pranavhj/openclaw-config, 1.0)',
-        },
-        method=method,
-    )
+    # Split long messages into chunks (Discord limit: 2000 chars)
+    MAX_LEN = 2000
+    message = args.message
+    if args.edit or len(message) <= MAX_LEN:
+        chunks = [message]
+    else:
+        # Split on newlines near the limit, preserving readability
+        chunks = []
+        while len(message) > MAX_LEN:
+            split_at = message.rfind('\n', 0, MAX_LEN)
+            if split_at <= 0:
+                split_at = MAX_LEN
+            chunks.append(message[:split_at])
+            message = message[split_at:].lstrip('\n')
+        if message:
+            chunks.append(message)
 
-    try:
-        with urllib.request.urlopen(req) as resp:
-            resp_body = resp.read()
-            if resp.status == 200:
-                data = json.loads(resp_body)
-                msg_id = data.get('id', '')
-                if msg_id:
-                    print(f'MSG_ID:{msg_id}')
-                if not args.edit:
-                    print('\u2705 Sent via Discord REST')
-                    # Test-mode capture: append message to file if env var set
-                    capture_file = os.environ.get('OPENCLAW_TEST_CAPTURE_FILE')
-                    if capture_file:
-                        with open(capture_file, 'a', encoding='utf-8') as cf:
-                            cf.write(args.message + '\n---MSG_SEP---\n')
-            else:
-                print(f'discord-send: HTTP {resp.status}', file=sys.stderr)
-                sys.exit(1)
-    except urllib.error.HTTPError as e:
-        print(f'discord-send: HTTP {e.code}', file=sys.stderr)
-        sys.exit(1)
-    except urllib.error.URLError as e:
-        print(f'discord-send: connection error: {e.reason}', file=sys.stderr)
-        sys.exit(1)
+    last_msg_id = None
+    for i, chunk in enumerate(chunks):
+        body = json.dumps({'content': chunk}).encode('utf-8')
+        url = f'https://discord.com/api/v10/channels/{args.target}/messages'
+        if args.edit:
+            url += f'/{args.edit}'
+        method = 'PATCH' if args.edit else 'POST'
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={
+                'Authorization': f'Bot {token}',
+                'Content-Type': 'application/json',
+                'User-Agent': 'DiscordBot (https://github.com/pranavhj/openclaw-config, 1.0)',
+            },
+            method=method,
+        )
+
+        try:
+            with urllib.request.urlopen(req) as resp:
+                resp_body = resp.read()
+                if resp.status == 200:
+                    data = json.loads(resp_body)
+                    msg_id = data.get('id', '')
+                    if msg_id:
+                        last_msg_id = msg_id
+                else:
+                    print(f'discord-send: HTTP {resp.status}', file=sys.stderr)
+                    sys.exit(1)
+        except urllib.error.HTTPError as e:
+            print(f'discord-send: HTTP {e.code}', file=sys.stderr)
+            sys.exit(1)
+        except urllib.error.URLError as e:
+            print(f'discord-send: connection error: {e.reason}', file=sys.stderr)
+            sys.exit(1)
+
+    if last_msg_id:
+        print(f'MSG_ID:{last_msg_id}')
+    if not args.edit:
+        if len(chunks) > 1:
+            print(f'\u2705 Sent via Discord REST ({len(chunks)} messages)')
+        else:
+            print('\u2705 Sent via Discord REST')
+        # Test-mode capture: append message to file if env var set
+        capture_file = os.environ.get('OPENCLAW_TEST_CAPTURE_FILE')
+        if capture_file:
+            with open(capture_file, 'a', encoding='utf-8') as cf:
+                cf.write(args.message + '\n---MSG_SEP---\n')
 
 
 if __name__ == '__main__':

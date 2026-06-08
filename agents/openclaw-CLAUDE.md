@@ -72,8 +72,9 @@ Project work (spawn sub-session) — for: fix, add, change, implement, refactor,
 Sub-session reads the project CLAUDE.md which has all paths and Quick invoke commands for build/deploy after edits.
 
 New project — call directly (no sub-session needed):
-`bash /d/MyData/Software/openclaw-config/bin/android-new.sh --slug <slug> --dest <path> [--app-tag <Tag>] [--github-repo pranavhj/<repo>]`
-Scaffolds project + generates CLAUDE.md automatically. Read `D:\MyData\Software\openclaw-config\agents\android.md` for toolchain reference.
+`bash /d/MyData/Software/openclaw-config/bin/android-new.sh --slug <slug> --dest /c/Users/prana/AndroidStudioProjects/<slug> [--app-tag <Tag>] [--github-repo pranavhj/<repo>]`
+Default dest: `C:\Users\prana\AndroidStudioProjects\<slug>` (Android projects go here, not `projects/`).
+Scaffolds project + generates CLAUDE.md + PROGRESS.md automatically. Read `D:\MyData\Software\openclaw-config\agents\android.md` for toolchain reference.
 
 **Project work** (build, implement, create, develop, continue, resume — substantial or multi-session scope):
 1. Match the request against the known projects list to find the project.
