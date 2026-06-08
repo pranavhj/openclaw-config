@@ -1,6 +1,22 @@
-# openclaw-config -- Terminal Claude Instructions
+# openclaw-config — infrastructure sub-session
 
 You are working on the openclaw configuration repo at `D:\MyData\Software\openclaw-config\`.
+Do NOT do project detection or spawn sub-sessions.
+
+## Sub-session rules
+1. Skim `PROGRESS.md` for current state
+2. Do the work (edit files in this directory)
+3. Update `PROGRESS.md`
+4. Send response via `discord-send.py`
+5. Output: SENT
+
+Send using:
+```
+python D:\MyData\Software\openclaw-config\bin\discord-send.py --target <target> --message "<text>"
+```
+
+---
+
 Follow these rules for every fix or change.
 
 ## After fixing anything
@@ -68,3 +84,37 @@ python D:\MyData\Software\openclaw-config\bin\discord-bot.py
 Or restart a running bot: `python D:\MyData\Software\openclaw-config\bin\restart-bot.py`
 
 Check open issues before diagnosing: read `ISSUES.md`
+
+---
+
+## Quick invoke
+
+```bash
+# Run full automated test suite (152 tests)
+bash /d/MyData/Software/openclaw-config/tests/run-android-tests.sh
+
+# Sync router backup after editing openclaw/CLAUDE.md
+cp /c/Users/prana/projects/openclaw/CLAUDE.md /d/MyData/Software/openclaw-config/agents/openclaw-CLAUDE.md
+```
+
+---
+
+## Android tooling (added 2026-06-07)
+
+System-wide scripts in `bin/` shared across all Android projects. Each project's CLAUDE.md references them with project-specific flags.
+
+**Files:**
+- `bin/android-deploy.sh` — build APK locally or download CI artifact, ADB install over Tailscale
+- `bin/android-logs.sh` — logcat by mode (default/full/crash) + `--dump` boolean for snapshot vs streaming
+- `bin/android-new.sh` — scaffold new project from `android-skeleton/` with APPSLUG replacement + CLAUDE.md generation
+- `android-skeleton/` — 22-file template (AGP 8.2.2, Gradle 8.2, minSdk 24, targetSdk 34, debug keystore)
+- `agents/android.md` — canonical knowledge base: paths, versions, templates, troubleshooting
+- `tests/run-android-tests.sh` + `tests/android-test-cases.md` — 152 automated tests + manual tracking
+
+**Device:** Tailscale `100.122.101.27:5555` (always use); local `10.0.0.122:5555` (may change)
+
+**android-deploy.sh:** reads applicationId from app/build.gradle automatically; signature mismatch recovery built-in
+**android-logs.sh:** `--dump` is a boolean flag independent of `--mode`; `--mode dump` is legacy alias for `--mode default --dump`
+**android-new.sh:** writes `local.properties` for CLI builds; generated CLAUDE.md has all 7 quick invoke entries
+
+**Known projects using this tooling:** `AndroidStudioProjects/TableNew`

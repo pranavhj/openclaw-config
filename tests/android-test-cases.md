@@ -5,7 +5,7 @@ Run automated tests: `bash tests/run-android-tests.sh`
 
 **Status codes:** `PASS` | `FAIL` | `PENDING` | `MANUAL` | `SKIP`
 
-Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); live device: D9/D11/D12/D13/D19/L9/N30/N31 PASS
+Last run: 2026-06-07 — 152 PASS, 0 FAIL (automated); live device: D9/D10/D11/D12/D13/D19/L9/N30/N31 PASS
 
 ---
 
@@ -16,13 +16,13 @@ Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); live device: D9/D11/D12/D
 | S1 | All required files exist (gradlew, gradlew.bat, gradle-wrapper.jar, gradle-wrapper.properties, build.gradle, settings.gradle, gradle.properties, app/build.gradle, AndroidManifest.xml, MainActivity.java, layout/activity_main.xml, values/strings.xml, values/colors.xml, values/themes.xml, drawable/ic_launcher_background.xml, drawable/ic_launcher_foreground.xml, mipmap-anydpi-v26/ic_launcher.xml, mipmap-anydpi-v26/ic_launcher_round.xml, debug.keystore, .gitignore) | PASS | |
 | S2 | gradle-wrapper.properties distributionUrl = gradle-8.2-bin.zip | PASS | |
 | S3 | Top-level build.gradle has AGP version 8.2.2 | PASS | |
-| S4 | app/build.gradle has namespace, applicationId, minSdk 24, targetSdk 34, debug keystore block | PENDING | |
+| S4 | app/build.gradle has namespace, applicationId, minSdk 24, targetSdk 34, debug keystore block | PASS | |
 | S5 | app/build.gradle still has APPSLUG placeholder (not pre-replaced) | PASS | |
 | S6 | settings.gradle has rootProject.name = "APPSLUG" | PASS | |
 | S7 | strings.xml has app_name = APPSLUG | PASS | |
 | S8 | themes.xml has Theme.APPSLUG | PASS | |
-| S9 | Adaptive icons exist as XML (no binary PNGs) — mipmap-anydpi-v26/ has ic_launcher.xml and ic_launcher_round.xml | PENDING | |
-| S10 | .gitignore excludes build/, .gradle/, local.properties | PENDING | |
+| S9 | Adaptive icons exist as XML (no binary PNGs) — mipmap-anydpi-v26/ has ic_launcher.xml and ic_launcher_round.xml | PASS | |
+| S10 | .gitignore excludes build/, .gradle/, local.properties | PASS | Bug #5 fix (was /build, now build/) |
 | S11 | debug.keystore is non-empty binary | PASS | |
 | S12 | gradle-wrapper.jar is non-empty binary | PASS | |
 
@@ -101,7 +101,7 @@ Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); live device: D9/D11/D12/D
 | ID | Test | Status | Notes |
 |----|------|--------|-------|
 | D9 | adb connect called before build | PASS | Line 59 (connect) < line 87 (gradlew) |
-| D10 | Unreachable device → "not reachable" error, exits non-zero | MANUAL | Disconnect device to test |
+| D10 | Unreachable device → "not reachable" error, exits non-zero | PASS | 127.0.0.1:5554 (refused immediately) |
 | D11 | Build failure (bad JAVA_HOME) → "Build failed.", exits non-zero | PASS | Confirmed exit 1 |
 | D12 | Successful build → APK at app/build/outputs/apk/debug/app-debug.apk | PASS | Bug #4 fix (exit code); live install confirmed |
 | D13 | adb install -r called with -s <device> flag | PASS | Script line 98 + live output confirmed |
@@ -131,7 +131,7 @@ Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); live device: D9/D11/D12/D
 ### Mode behaviour (requires device for full test; script construction testable without)
 | ID | Test | Status | Notes |
 |----|------|--------|-------|
-| L5 | --mode default (no --dump): command includes "*:S" TAG:V AndroidRuntime:E, no -d | PASS | Verify via dry-run grep |
+| L5 | --mode default (no --dump): command includes "*:S" TAG:V AndroidRuntime:E, no -d | PASS | grep -F confirms exact filter text |
 | L6 | --mode full (no --dump): command is logcat -v time, no filter, no -d | MANUAL | |
 | L7 | --mode crash (no --dump): command includes "*:S" AndroidRuntime:E TAG:E, no -d | PASS | |
 | L8 | --dump flag: -d added to command | PASS | |
@@ -149,16 +149,16 @@ Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); live device: D9/D11/D12/D
 |----|------|--------|-------|
 | A1 | File exists at D:\MyData\Software\openclaw-config\agents\android.md | PASS | |
 | A2 | All 10 paths present: ADB, JAVA_HOME, SDK root, GH CLI, android-deploy, android-logs, android-new, android-skeleton, discord-send, agent-smart | PASS | |
-| A3 | Device section has both IPs: 100.122.101.27:5555 and 10.0.0.122:5555 | PENDING | |
-| A4 | Toolchain versions: AGP 8.2.2, Gradle 8.2, Java 17, source/target 1.8, minSdk 24, targetSdk 34 | PENDING | |
-| A5 | Debug keystore creds: storepass=android, alias=androiddebugkey, keypass=android | PENDING | |
-| A6 | Usage examples for android-deploy.sh, android-logs.sh, android-new.sh | PENDING | |
+| A3 | Device section has both IPs: 100.122.101.27:5555 and 10.0.0.122:5555 | PASS | |
+| A4 | Toolchain versions: AGP 8.2.2, Gradle 8.2, Java 17, source/target 1.8, minSdk 24, targetSdk 34 | PASS | |
+| A5 | Debug keystore creds: storepass=android, alias=androiddebugkey, keypass=android | PASS | |
+| A6 | Usage examples for android-deploy.sh, android-logs.sh, android-new.sh | PASS | |
 | A7 | dump mode note: "Use dump for Discord output — streaming modes block" | PASS | |
-| A8 | Local vs CI deploy comparison | PENDING | |
-| A9 | app/build.gradle template has correct namespace, applicationId, signingConfig, compileOptions VERSION_1_8 | PENDING | |
-| A10 | GitHub Actions template uses java-version 17, distribution temurin, artifact name app-debug | PENDING | |
+| A8 | Local vs CI deploy comparison | PASS | |
+| A9 | app/build.gradle template has correct namespace, applicationId, signingConfig, compileOptions VERSION_1_8 | PASS | |
+| A10 | GitHub Actions template uses java-version 17, distribution temurin, artifact name app-debug | PASS | |
 | A11 | Android detection heuristics present | PASS | |
-| A12 | Troubleshooting covers: build, ADB, logcat, runtime errors | PENDING | |
+| A12 | Troubleshooting covers: build, ADB, logcat, runtime errors | PASS | |
 | A13 | New project guide uses android-new.sh (not "open Android Studio") | PASS | |
 
 ---
@@ -169,19 +169,19 @@ Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); live device: D9/D11/D12/D
 |----|------|--------|-------|
 | T1 | File exists at AndroidStudioProjects/TableNew/CLAUDE.md | PASS | |
 | T2 | Sub-session rules (5-step) present | PASS | |
-| T3 | All 6 paths in table: ADB, JAVA_HOME, GH CLI, android-deploy, android-logs, discord-send | PENDING | |
+| T3 | All 6 paths in table: ADB, JAVA_HOME, GH CLI, android-deploy, android-logs, discord-send | PASS | |
 | T4 | Tailscale IP 100.122.101.27:5555 in Device section (not local IP) | PASS | |
 | T5 | Package: com.example.tablenew | PASS | |
 | T6 | GitHub repo: pranavhj/TableNew | PASS | |
-| T7 | Source paths list MainActivity.java and TCPClient.java | PENDING | |
+| T7 | Source paths list MainActivity.java and TCPClient.java | PASS | |
 | T8 | 7 quick invoke entries: build, deploy, deploy-ci, logs, logs-dump, logs-crash, adb-connect | PASS | |
 | T9 | deploy quick invoke: --project /c/Users/prana/AndroidStudioProjects/TableNew | PASS | |
 | T10 | deploy and deploy-ci use Tailscale IP 100.122.101.27:5555 | PASS | |
 | T11 | logs-dump uses --mode default --dump or --mode dump | PASS | |
 | T12 | logs-crash uses --mode crash --dump (Bug #1 fix) | PASS | |
 | T13 | logs has NO --dump flag (streaming) | PASS | |
-| T14 | adb-connect uses full ADB path and Tailscale IP | PENDING | |
-| T15 | Stack: Java 1.8 compat, AGP 8.2.2, minSdk 24, targetSdk 34 | PENDING | |
+| T14 | adb-connect uses full ADB path and Tailscale IP | PASS | |
+| T15 | Stack: Java 1.8 compat, AGP 8.2.2, minSdk 24, targetSdk 34 | PASS | |
 | T16 | Pointer to agents/android.md | PASS | |
 
 ---
@@ -240,3 +240,4 @@ Last run: 2026-06-07 — 143 PASS, 0 FAIL (automated); live device: D9/D11/D12/D
 | BUG-2 | android-new.sh did not create local.properties — new project builds fail with "SDK location not found" | android-new.sh now writes local.properties with sdk.dir | FIXED |
 | BUG-3 | Router mapped all log requests including "crash" to logs-dump (default filter) | Added separate logs-crash row in routing table pointing to crash-filter+dump | FIXED |
 | BUG-4 | android-deploy.sh exits 1 even on successful local deploy — `[[ -n "$CI_REPO" ]] && rm ...` last line returns 1 (empty var) with `set -e` | Changed to `if [[ -n "$CI_REPO" ]]; then rm ...; fi` | FIXED |
+| BUG-5 | android-skeleton .gitignore had `/build` (root only) — app/build/ not excluded after a build | Changed to `build/` to cover all subdirectories | FIXED |

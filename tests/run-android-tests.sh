@@ -53,15 +53,23 @@ check_file "$SKEL/.gitignore" S1t
 
 check_contains "$SKEL/gradle/wrapper/gradle-wrapper.properties" S2 "gradle-8.2-bin.zip"
 check_contains "$SKEL/build.gradle" S3 "8.2.2"
-check_contains "$SKEL/app/build.gradle" S4a "minSdk 24"
-check_contains "$SKEL/app/build.gradle" S4b "targetSdk 34"
-check_contains "$SKEL/app/build.gradle" S4c "androiddebugkey"
+check_contains "$SKEL/app/build.gradle" S4a "namespace"
+check_contains "$SKEL/app/build.gradle" S4b "minSdk 24"
+check_contains "$SKEL/app/build.gradle" S4c "targetSdk 34"
+check_contains "$SKEL/app/build.gradle" S4d "androiddebugkey"
 check_contains "$SKEL/app/build.gradle" S5 "APPSLUG"
 check_contains "$SKEL/settings.gradle" S6 'rootProject.name = "APPSLUG"'
 check_contains "$SKEL/app/src/main/res/values/strings.xml" S7 "APPSLUG"
 check_contains "$SKEL/app/src/main/res/values/themes.xml" S8 "Theme.APPSLUG"
 check_nonempty "$SKEL/debug.keystore" S11
 check_nonempty "$SKEL/gradle/wrapper/gradle-wrapper.jar" S12
+# S9: adaptive icons must be XML only — no binary PNGs in mipmap-anydpi-v26/
+png_files=$(find "$SKEL/app/src/main/res/mipmap-anydpi-v26/" -name "*.png" 2>/dev/null)
+[[ -z "$png_files" ]] && pass S9 "no PNGs in mipmap-anydpi-v26/ (XML only)" || fail S9 "PNG files found: $png_files"
+# S10: .gitignore excludes build/, .gradle/, local.properties
+check_contains "$SKEL/.gitignore" S10a "build/"
+check_contains "$SKEL/.gitignore" S10b ".gradle"
+check_contains "$SKEL/.gitignore" S10c "local.properties"
 
 echo ""
 echo "=== android-new.sh argument handling ==="
@@ -89,6 +97,9 @@ else
     check_contains "$TMP_PROJ/app/src/main/res/values/strings.xml" N11 "sensorapp"
     [[ -d "$TMP_PROJ/app/src/main/java/com/example/sensorapp" ]] && pass N12 "package dir renamed to sensorapp" || fail N12 "sensorapp/ dir missing"
     [[ ! -d "$TMP_PROJ/app/src/main/java/com/example/APPSLUG" ]] && pass N13 "APPSLUG/ dir gone" || fail N13 "APPSLUG/ dir still exists"
+    # N13b: verify no APPSLUG remains in any text file (completeness check)
+    remaining_appslug=$(find "$TMP_PROJ" -type f ! -name "*.jar" ! -name "*.keystore" ! -name "*.class" | xargs grep -rl "APPSLUG" 2>/dev/null)
+    [[ -z "$remaining_appslug" ]] && pass N13b "no APPSLUG left in any text file" || fail N13b "APPSLUG still in: $remaining_appslug"
     ORIG_JAR="$SKEL/gradle/wrapper/gradle-wrapper.jar"
     NEW_JAR="$TMP_PROJ/gradle/wrapper/gradle-wrapper.jar"
     [[ $(wc -c < "$NEW_JAR") -eq $(wc -c < "$ORIG_JAR") ]] && pass N14 "gradle-wrapper.jar byte count matches" || fail N14 "gradle-wrapper.jar differs"
@@ -109,10 +120,11 @@ else
     grep -q "# logs " "$TMP_PROJ/CLAUDE.md" && \
         ! grep -A2 "# logs " "$TMP_PROJ/CLAUDE.md" | grep -q "\-\-dump" && \
         pass N27 "logs entry has no --dump" || fail N27 "logs entry incorrectly has --dump"
+    N28_FAIL=0
     for entry in "build" "deploy" "deploy-ci" "logs-dump" "logs-crash" "logs" "adb-connect"; do
-        grep -q "# $entry" "$TMP_PROJ/CLAUDE.md" 2>/dev/null || { fail N28 "missing quick invoke: $entry"; }
+        grep -q "# $entry" "$TMP_PROJ/CLAUDE.md" 2>/dev/null || { fail N28 "missing quick invoke: $entry"; N28_FAIL=1; }
     done
-    pass N28 "all 7 quick invoke entries present"
+    [[ $N28_FAIL -eq 0 ]] && pass N28 "all 7 quick invoke entries present"
     check_contains "$TMP_PROJ/CLAUDE.md" N29 "android.md"
 fi
 
@@ -143,6 +155,20 @@ bash "$DEPLOY" --project "$TMPG" --device 1.2.3.4:5555 2>/dev/null; [[ $? -ne 0 
 rm -rf "$TMPG"
 
 echo ""
+echo "=== android-deploy.sh unreachable device ==="
+TMPG=$(mktemp -d); mkdir -p "$TMPG/app"
+echo 'applicationId "com.example.test"' > "$TMPG/app/build.gradle"
+# 127.0.0.1:5554 — localhost wrong port, always immediately refused, never in adb devices
+out=$(bash "$DEPLOY" --project "$TMPG" --device 127.0.0.1:5554 2>&1)
+rc=$?
+rm -rf "$TMPG"
+if [[ $rc -ne 0 ]] && echo "$out" | grep -qi "not reachable"; then
+    pass D10 "unreachable device → 'not reachable' error, exits non-zero"
+else
+    fail D10 "expected non-zero + 'not reachable' (rc=$rc)"
+fi
+
+echo ""
 echo "=== android-logs.sh argument handling ==="
 
 bash "$LOGS" 2>/dev/null; [[ $? -ne 0 ]] && pass L1 "no args exits non-zero" || fail L1 "should exit non-zero"
@@ -153,6 +179,8 @@ bash "$LOGS" --tag MyApp --device x --unknown 2>/dev/null; [[ $? -ne 0 ]] && pas
 echo ""
 echo "=== android-logs.sh mode logic (script inspection) ==="
 
+# L5: default mode (*) filter: *:S, TAG:V, AndroidRuntime:E
+grep -qF '"*:S" "${TAG}:V" AndroidRuntime:E' "$LOGS" && pass L5 "default mode filter: *:S TAG:V AndroidRuntime:E" || fail L5 "default mode filter not found"
 # Test that --dump flag is parsed as a separate boolean
 grep -q "\-\-dump)[[:space:]]*DUMP=1" "$LOGS" && pass L8 "--dump flag sets DUMP=1" || fail L8 "--dump flag not found in script"
 # Test legacy --mode dump still handled
@@ -205,8 +233,14 @@ check_contains "$TABLENEW" T9 "/c/Users/prana/AndroidStudioProjects/TableNew"
 check_contains "$TABLENEW" T10 "100.122.101.27:5555"
 check_contains "$TABLENEW" T11 "\-\-mode default \-\-dump\|\-\-mode dump"
 check_contains "$TABLENEW" T12 "\-\-mode crash \-\-dump"
-# logs entry should NOT have --dump
-! grep -A2 "^# logs$" "$TABLENEW" | grep -q "\-\-dump" && pass T13 "logs has no --dump" || fail T13 "logs incorrectly has --dump"
+# T13: logs (streaming) entry must NOT have --dump; match "# logs " (with space/paren) to exclude logs-dump/logs-crash
+logs_stream_cmd=$(grep -A3 "^# logs " "$TABLENEW" | grep -v "^# logs ")
+if echo "$logs_stream_cmd" | grep -qF -- "--dump"; then
+    fail T13 "logs streaming entry incorrectly has --dump"
+else
+    pass T13 "logs streaming entry has no --dump"
+fi
+check_contains "$TABLENEW" T14 "adb.exe connect 100.122.101.27:5555"
 check_contains "$TABLENEW" T15a "AGP.*8.2.2\|8.2.2.*AGP"
 check_contains "$TABLENEW" T15b "minSdk.*24\|24.*minSdk"
 check_contains "$TABLENEW" T16 "android.md"
@@ -217,7 +251,7 @@ echo "=== Router openclaw/CLAUDE.md ==="
 check_contains "$ROUTER" R1 "Android projects"
 check_contains "$ROUTER" R2 "app/build.gradle"
 check_contains "$ROUTER" R3 "AndroidManifest.xml"
-check_contains "$ROUTER" R4 "create.*android\|Android.*create"
+grep -qi "create.*android\|new.*android\|android.*new" "$ROUTER" && pass R4 "create/new Android project detection present" || fail R4 "create/new Android project detection missing"
 check_contains "$ROUTER" R5 "logs-crash"
 check_contains "$ROUTER" R6 "deploy"
 check_contains "$ROUTER" R7 "deploy-ci"

@@ -190,7 +190,8 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         Path('D:/MyData/Software'),
     ]
     # Dirs to always exclude (infra/config repos, not user projects)
-    EXCLUDE_NAMES = {'openclaw-config'}
+    # Note: openclaw-config removed from exclusion — user works on this infra via Discord
+    EXCLUDE_NAMES: set = set()
 
     projects = []  # list of (name, full_path)
     for root in FILTERED_ROOTS:
