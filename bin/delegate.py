@@ -37,21 +37,17 @@ def ts_ms() -> str:
     return now.strftime('%Y-%m-%dT%H:%M:%S.') + f'{now.microsecond // 1000:03d}Z'
 
 
-def _extract_last_reply(max_chars=500) -> str:
-    """Find the most recently modified JSONL in Claude projects dir and extract the last assistant text."""
+TRIVIAL_REPLIES = {'SENT', 'Output: SENT', 'done', 'Done', 'OK', 'ok'}
+
+
+def _extract_reply_from_jsonl(path, max_chars=500) -> str:
+    """Extract the last meaningful assistant text from a JSONL file."""
     try:
-        jsonl_files = glob.glob(f'{CLAUDE_PROJECTS_DIR}/**/*.jsonl', recursive=True)
-        if not jsonl_files:
-            return ''
-        # Find most recently modified
-        newest = max(jsonl_files, key=os.path.getmtime)
-        # Read last ~20KB to find last assistant text (avoid reading huge files)
-        size = os.path.getsize(newest)
-        with open(newest, 'rb') as f:
+        size = os.path.getsize(path)
+        with open(path, 'rb') as f:
             if size > 20480:
                 f.seek(size - 20480)
             data = f.read().decode('utf-8', errors='replace')
-        # Parse lines in reverse to find last assistant text
         lines = data.splitlines()
         for line in reversed(lines):
             line = line.strip()
@@ -63,20 +59,48 @@ def _extract_last_reply(max_chars=500) -> str:
                 if msg.get('role') != 'assistant':
                     continue
                 content = msg.get('content', [])
+                text = ''
                 if isinstance(content, str):
-                    return content[:max_chars]
-                if isinstance(content, list):
-                    # Collect all text blocks from this message
-                    texts = []
+                    text = content.strip()
+                elif isinstance(content, list):
+                    parts = []
                     for c in content:
                         if isinstance(c, dict) and c.get('type') == 'text':
                             t = c.get('text', '').strip()
                             if t:
-                                texts.append(t)
-                    if texts:
-                        return ' '.join(texts)[:max_chars]
+                                parts.append(t)
+                    text = ' '.join(parts)
+                # Skip trivial marker strings
+                if text and text not in TRIVIAL_REPLIES:
+                    return text[:max_chars]
             except (json.JSONDecodeError, AttributeError):
                 continue
+    except Exception:
+        pass
+    return ''
+
+
+def _extract_last_reply(agent_start_time=None, max_chars=500) -> str:
+    """Find JONSLs modified during the agent run and extract the last meaningful assistant text.
+
+    Checks most recently modified files first. Skips trivial replies like 'SENT'.
+    If agent_start_time (time.time() epoch) is given, only considers files modified after that.
+    """
+    try:
+        jsonl_files = glob.glob(f'{CLAUDE_PROJECTS_DIR}/**/*.jsonl', recursive=True)
+        if not jsonl_files:
+            return ''
+        # Filter to files modified after agent started (if given)
+        if agent_start_time:
+            jsonl_files = [f for f in jsonl_files if os.path.getmtime(f) >= agent_start_time]
+        if not jsonl_files:
+            return ''
+        # Sort by mtime descending — check newest files first
+        jsonl_files.sort(key=os.path.getmtime, reverse=True)
+        for path in jsonl_files[:5]:  # check up to 5 most recent
+            reply = _extract_reply_from_jsonl(path, max_chars)
+            if reply:
+                return reply
     except Exception:
         pass
     return ''
@@ -335,6 +359,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     # --- Run agent ---
     ts_agent_start = ts_ms()
     t_agent = time.monotonic()
+    t_agent_wall = time.time()  # wall-clock for JSONL file mtime filtering
     tl({'ts': ts_agent_start, 'event': 'agent_start', 'channel': channel, 'target': target})
 
     WORK_DIR.mkdir(parents=True, exist_ok=True)
@@ -412,7 +437,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         'duration_ms': duration_ms, 'output_preview': output[:60].replace('\n', ' ')})
 
     # Extract and log Claude's reply from the JSONL session file
-    reply_preview = _extract_last_reply(max_chars=300)
+    reply_preview = _extract_last_reply(agent_start_time=t_agent_wall, max_chars=300)
     if reply_preview:
         tl({'ts': ts_ms(), 'event': 'delegate_reply',
             'reply_preview': reply_preview.replace('\n', ' ')})
