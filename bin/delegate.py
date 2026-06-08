@@ -380,6 +380,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     try:
         proc = subprocess.Popen(
             [sys.executable, str(AGENT_SMART_PY),
+             '--continue',
              '--permission-mode', 'bypassPermissions',
              '--max-turns', '40',
              '--model', 'haiku', '--print-file', str(prompt_file)],
