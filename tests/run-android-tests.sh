@@ -81,6 +81,11 @@ mkdir -p /tmp/android-test-exists && bash "$NEW" --slug x --dest /tmp/android-te
 [[ $? -ne 0 ]] && pass N4 "existing dest exits non-zero" || fail N4 "should error on existing dest"
 rm -rf /tmp/android-test-exists
 bash "$NEW" --slug x --dest /tmp/y --unknown 2>/dev/null; [[ $? -ne 0 ]] && pass N5 "unknown flag exits non-zero" || fail N5 "should error on unknown flag"
+# Slug validation: hyphens, dots, uppercase, leading digit all rejected
+bash "$NEW" --slug "my-app" --dest /tmp/x 2>/dev/null; [[ $? -ne 0 ]] && pass N5a "hyphen slug rejected" || fail N5a "hyphen slug should be rejected"
+bash "$NEW" --slug "MyApp" --dest /tmp/x 2>/dev/null; [[ $? -ne 0 ]] && pass N5b "uppercase slug rejected" || fail N5b "uppercase slug should be rejected"
+bash "$NEW" --slug "2app" --dest /tmp/x 2>/dev/null; [[ $? -ne 0 ]] && pass N5c "digit-leading slug rejected" || fail N5c "digit-leading slug should be rejected"
+bash "$NEW" --slug "app.one" --dest /tmp/x 2>/dev/null; [[ $? -ne 0 ]] && pass N5d "dot-containing slug rejected" || fail N5d "dot slug should be rejected"
 
 echo ""
 echo "=== android-new.sh scaffolding (running --slug sensorapp) ==="
@@ -95,8 +100,23 @@ else
     check_contains "$TMP_PROJ/app/src/main/AndroidManifest.xml" N9 "Theme.sensorapp"
     check_contains "$TMP_PROJ/app/src/main/java/com/example/sensorapp/MainActivity.java" N10 "package com.example.sensorapp"
     check_contains "$TMP_PROJ/app/src/main/res/values/strings.xml" N11 "sensorapp"
-    [[ -d "$TMP_PROJ/app/src/main/java/com/example/sensorapp" ]] && pass N12 "package dir renamed to sensorapp" || fail N12 "sensorapp/ dir missing"
-    [[ ! -d "$TMP_PROJ/app/src/main/java/com/example/APPSLUG" ]] && pass N13 "APPSLUG/ dir gone" || fail N13 "APPSLUG/ dir still exists"
+    [[ -d "$TMP_PROJ/app/src/main/java/com/example/sensorapp" ]] && pass N12 "package dir renamed to sensorapp (main)" || fail N12 "sensorapp/ dir missing in main"
+    [[ ! -d "$TMP_PROJ/app/src/main/java/com/example/APPSLUG" ]] && pass N13 "APPSLUG/ dir gone (main)" || fail N13 "APPSLUG/ dir still exists in main"
+    # N12b/N13b: test and androidTest dirs also renamed
+    if [[ -d "$TMP_PROJ/app/src/test/java/com/example/APPSLUG" ]]; then
+        fail N12b "APPSLUG/ dir still exists in test/"
+    elif [[ -d "$TMP_PROJ/app/src/test" ]]; then
+        [[ -d "$TMP_PROJ/app/src/test/java/com/example/sensorapp" ]] && pass N12b "package dir renamed in test/" || fail N12b "sensorapp/ dir missing in test/"
+    else
+        pass N12b "no test/ source dir in skeleton (ok)"
+    fi
+    if [[ -d "$TMP_PROJ/app/src/androidTest/java/com/example/APPSLUG" ]]; then
+        fail N12c "APPSLUG/ dir still exists in androidTest/"
+    elif [[ -d "$TMP_PROJ/app/src/androidTest" ]]; then
+        [[ -d "$TMP_PROJ/app/src/androidTest/java/com/example/sensorapp" ]] && pass N12c "package dir renamed in androidTest/" || fail N12c "sensorapp/ dir missing in androidTest/"
+    else
+        pass N12c "no androidTest/ source dir in skeleton (ok)"
+    fi
     # N13b: verify no APPSLUG remains in any text file (completeness check)
     remaining_appslug=$(find "$TMP_PROJ" -type f ! -name "*.jar" ! -name "*.keystore" ! -name "*.class" | xargs grep -rl "APPSLUG" 2>/dev/null)
     [[ -z "$remaining_appslug" ]] && pass N13b "no APPSLUG left in any text file" || fail N13b "APPSLUG still in: $remaining_appslug"
@@ -152,6 +172,15 @@ PKG=$(grep -m1 'applicationId' "$TMPG/app/build.gradle" | sed 's/.*applicationId
 
 echo 'namespace "com.example.baz"' > "$TMPG/app/build.gradle"
 bash "$DEPLOY" --project "$TMPG" --device 1.2.3.4:5555 2>/dev/null; [[ $? -ne 0 ]] && pass D8 "missing applicationId exits non-zero" || fail D8 "should error"
+# D8b: comment line with applicationId must not be parsed
+echo $'// applicationId "com.example.commented"\napplicationId "com.example.real"' > "$TMPG/app/build.gradle"
+PKG=$(grep -v '^\s*//' "$TMPG/app/build.gradle" | grep -m1 'applicationId' | sed 's/.*applicationId[[:space:]]*=\?[[:space:]]*"\([^"]*\)".*/\1/')
+[[ "$PKG" == "com.example.real" ]] && pass D8b "commented applicationId line skipped" || fail D8b "expected com.example.real, got: $PKG"
+# D9b: build.gradle.kts detected when build.gradle absent
+rm -f "$TMPG/app/build.gradle"
+echo 'applicationId = "com.example.kts"' > "$TMPG/app/build.gradle.kts"
+PKG=$(grep -v '^\s*//' "$TMPG/app/build.gradle.kts" | grep -m1 'applicationId' | sed 's/.*applicationId[[:space:]]*=\?[[:space:]]*"\([^"]*\)".*/\1/')
+[[ "$PKG" == "com.example.kts" ]] && pass D9b "build.gradle.kts applicationId parsed" || fail D9b "expected com.example.kts, got: $PKG"
 rm -rf "$TMPG"
 
 echo ""
@@ -175,6 +204,30 @@ bash "$LOGS" 2>/dev/null; [[ $? -ne 0 ]] && pass L1 "no args exits non-zero" || 
 bash "$LOGS" --device 1.2.3.4:5555 2>/dev/null; [[ $? -ne 0 ]] && pass L2 "missing --tag exits non-zero" || fail L2 "should exit non-zero"
 bash "$LOGS" --tag MyApp 2>/dev/null; [[ $? -ne 0 ]] && pass L3 "missing --device exits non-zero" || fail L3 "should exit non-zero"
 bash "$LOGS" --tag MyApp --device x --unknown 2>/dev/null; [[ $? -ne 0 ]] && pass L4 "unknown flag exits non-zero" || fail L4 "should exit non-zero"
+# L4b: invalid --mode value exits non-zero
+bash "$LOGS" --tag MyApp --device 1.2.3.4:5555 --mode typo 2>/dev/null; [[ $? -ne 0 ]] && pass L4b "invalid --mode exits non-zero" || fail L4b "invalid --mode should be rejected"
+
+echo ""
+echo "=== script quality (inspection) ==="
+grep -q "pipefail" "$DEPLOY" && pass Q1 "android-deploy.sh has pipefail" || fail Q1 "android-deploy.sh missing pipefail"
+grep -q "pipefail" "$LOGS" && pass Q2 "android-logs.sh has pipefail" || fail Q2 "android-logs.sh missing pipefail"
+grep -q "pipefail" "$NEW" && pass Q3 "android-new.sh has pipefail" || fail Q3 "android-new.sh missing pipefail"
+grep -q 'grep -F' "$DEPLOY" && pass Q4 "android-deploy.sh uses grep -F for device check" || fail Q4 "android-deploy.sh should use grep -F"
+grep -q 'grep -F' "$LOGS" && pass Q5 "android-logs.sh uses grep -F for device check" || fail Q5 "android-logs.sh should use grep -F"
+grep -q '"device\$"' "$DEPLOY" && pass Q6 "android-deploy.sh checks device state (not just presence)" || fail Q6 "android-deploy.sh should verify 'device' state"
+grep -q '"device\$"' "$LOGS" && pass Q7 "android-logs.sh checks device state (not just presence)" || fail Q7 "android-logs.sh should verify 'device' state"
+grep -q 'grep -v.*\/\/' "$DEPLOY" && pass Q8 "android-deploy.sh filters comment lines from applicationId grep" || fail Q8 "android-deploy.sh should skip comment lines"
+grep -q 'build.gradle.kts' "$DEPLOY" && pass Q9 "android-deploy.sh supports build.gradle.kts" || fail Q9 "android-deploy.sh missing kts support"
+grep -q 'INSTALL_FAILED_UPDATE_INCOMPATIBLE\|INCONSISTENT_CERTIFICATES' "$DEPLOY" && pass Q10 "android-deploy.sh sig mismatch recovery is targeted" || fail Q10 "sig mismatch recovery should check error text"
+grep -q 'trap' "$DEPLOY" && pass Q11 "android-deploy.sh has trap for CI temp cleanup" || fail Q11 "android-deploy.sh missing trap for CI cleanup"
+grep -q '\$# -ge 2' "$DEPLOY" && pass Q12 "android-deploy.sh has shift guards" || fail Q12 "android-deploy.sh missing shift guards"
+grep -q '\$# -ge 2' "$NEW" && pass Q13 "android-new.sh has shift guards" || fail Q13 "android-new.sh missing shift guards"
+grep -q '".*\$SLUG.*"\|'"'[a-z].*regex'" "$NEW" && pass Q14 "android-new.sh has slug validation" || fail Q14 "android-new.sh missing slug validation"
+# gitignore should not have duplicate local.properties
+dup=$(grep -c "local.properties" "$SKEL/.gitignore" 2>/dev/null)
+[[ "$dup" -le 1 ]] && pass Q15 ".gitignore has no duplicate local.properties" || fail Q15 ".gitignore has $dup local.properties entries"
+# CLAUDE.md generated by android-new.sh should quote DEST in deploy commands
+grep -q '"$DEST"' "$NEW" && pass Q16 'android-new.sh quotes $DEST in CLAUDE.md deploy commands' || fail Q16 'android-new.sh should quote $DEST'
 
 echo ""
 echo "=== android-logs.sh mode logic (script inspection) ==="

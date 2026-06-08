@@ -5,19 +5,19 @@
 #   bash android-new.sh --slug <name> --dest <path> [--app-tag <Tag>] [--github-repo <owner/repo>]
 #
 # Flags:
-#   --slug        short app name, lowercase, no spaces (e.g. sensorapp)  [required]
-#   --dest        full destination path                                    [required]
+#   --slug        short app name, lowercase letters/digits, no hyphens (e.g. sensorapp) [required]
+#   --dest        full destination path                                                  [required]
 #   --app-tag     display name / logcat tag (default: capitalized slug)
 #   --github-repo GitHub repo slug (default: pranavhj/<slug>)
 #
 # What it does:
 #   1. Copies android-skeleton/ to <dest>
 #   2. Replaces APPSLUG placeholder throughout all text files
-#   3. Renames the Java package directory
+#   3. Renames the Java package directories (main, test, androidTest)
 #   4. Generates CLAUDE.md with all values filled in
 #   5. Runs git init + initial commit
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKELETON_DIR="$(cd "$SCRIPT_DIR/../android-skeleton" && pwd)"
@@ -29,16 +29,26 @@ APP_TAG=""
 GITHUB_REPO=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --slug)        SLUG="$2";        shift 2 ;;
-        --dest)        DEST="$2";        shift 2 ;;
-        --app-tag)     APP_TAG="$2";     shift 2 ;;
-        --github-repo) GITHUB_REPO="$2"; shift 2 ;;
+        --slug)        [[ $# -ge 2 ]] || { echo "Error: --slug requires a value"; exit 1; }
+                       SLUG="$2";        shift 2 ;;
+        --dest)        [[ $# -ge 2 ]] || { echo "Error: --dest requires a value"; exit 1; }
+                       DEST="$2";        shift 2 ;;
+        --app-tag)     [[ $# -ge 2 ]] || { echo "Error: --app-tag requires a value"; exit 1; }
+                       APP_TAG="$2";     shift 2 ;;
+        --github-repo) [[ $# -ge 2 ]] || { echo "Error: --github-repo requires a value"; exit 1; }
+                       GITHUB_REPO="$2"; shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
 
 if [[ -z "$SLUG" || -z "$DEST" ]]; then
     echo "Usage: bash android-new.sh --slug <name> --dest <path> [--app-tag <Tag>] [--github-repo owner/repo]"
+    exit 1
+fi
+
+# Validate slug: lowercase letters and digits only, must start with a letter
+if [[ ! "$SLUG" =~ ^[a-z][a-z0-9]*$ ]]; then
+    echo "Error: --slug must be lowercase letters/digits only, starting with a letter (e.g. sensorapp, myapp2)"
     exit 1
 fi
 
@@ -61,17 +71,22 @@ echo "  GitHub repo: $GITHUB_REPO"
 # --- Copy skeleton ---
 cp -r "$SKELETON_DIR" "$DEST"
 
-# --- Replace APPSLUG in all text files ---
-find "$DEST" -type f ! -name "*.jar" ! -name "*.keystore" ! -name "gradlew.bat" | while read -r f; do
-    if file "$f" | grep -q "text"; then
-        sed -i "s/APPSLUG/$SLUG/g" "$f"
-    fi
-done
+# --- Replace APPSLUG in all text files (extension-based, no `file` command) ---
+# Process substitution avoids find|while subshell — errors propagate correctly
+while IFS= read -r f; do
+    case "$f" in
+        *.java|*.xml|*.gradle|*.properties|*.md|*.txt|*.json|*.yaml|*.yml|*.sh|*.bat|*.pro|gradlew)
+            sed -i "s/APPSLUG/$SLUG/g" "$f"
+            ;;
+    esac
+done < <(find "$DEST" -type f ! -name "*.jar" ! -name "*.keystore")
 
-# --- Rename Java package directory ---
-OLD_PKG_DIR="$DEST/app/src/main/java/com/example/APPSLUG"
-NEW_PKG_DIR="$DEST/app/src/main/java/com/example/$SLUG"
-[[ -d "$OLD_PKG_DIR" ]] && mv "$OLD_PKG_DIR" "$NEW_PKG_DIR"
+# --- Rename Java package directories (main, test, androidTest) ---
+for SRC_TYPE in main test androidTest; do
+    OLD_PKG_DIR="$DEST/app/src/$SRC_TYPE/java/com/example/APPSLUG"
+    NEW_PKG_DIR="$DEST/app/src/$SRC_TYPE/java/com/example/$SLUG"
+    [[ -d "$OLD_PKG_DIR" ]] && mv "$OLD_PKG_DIR" "$NEW_PKG_DIR"
+done
 
 # --- Write local.properties (SDK location for CLI builds) ---
 echo 'sdk.dir=C\:\\Users\\prana\\AppData\\Local\\Android\\Sdk' > "$DEST/local.properties"
@@ -132,12 +147,12 @@ export JAVA_HOME="/c/Users/prana/jdk17/jdk-17.0.19+10" && ./gradlew assembleDebu
 
 # deploy (local build → install on phone)
 bash /d/MyData/Software/openclaw-config/bin/android-deploy.sh \\
-  --project $DEST \\
+  --project "$DEST" \\
   --device 100.122.101.27:5555
 
 # deploy-ci (GitHub Actions artifact → install on phone)
 bash /d/MyData/Software/openclaw-config/bin/android-deploy.sh \\
-  --project $DEST \\
+  --project "$DEST" \\
   --device 100.122.101.27:5555 \\
   --ci $GITHUB_REPO
 
@@ -192,6 +207,6 @@ echo "Package: $PACKAGE"
 echo "CLAUDE.md generated."
 echo ""
 echo "Next steps:"
-echo "  1. Build: cd $DEST && export JAVA_HOME=/c/Users/prana/jdk17/jdk-17.0.19+10 && ./gradlew assembleDebug"
-echo "  2. Deploy: bash /d/MyData/Software/openclaw-config/bin/android-deploy.sh --project $DEST --device 100.122.101.27:5555"
-echo "  3. Push: cd $DEST && /c/Program\ Files/GitHub\ CLI/gh.exe repo create $GITHUB_REPO --public --source=. --push"
+echo "  1. Build: cd \"$DEST\" && export JAVA_HOME=/c/Users/prana/jdk17/jdk-17.0.19+10 && ./gradlew assembleDebug"
+echo "  2. Deploy: bash /d/MyData/Software/openclaw-config/bin/android-deploy.sh --project \"$DEST\" --device 100.122.101.27:5555"
+echo "  3. Push: cd \"$DEST\" && /c/Program\ Files/GitHub\ CLI/gh.exe repo create $GITHUB_REPO --public --source=. --push"

@@ -19,7 +19,7 @@
 #
 # Legacy: --mode dump still works (= --mode default --dump)
 
-set -e
+set -eo pipefail
 
 ADB="/c/Users/prana/AppData/Local/Android/Sdk/platform-tools/adb.exe"
 
@@ -30,9 +30,12 @@ MODE="default"
 DUMP=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --tag)    TAG="$2";    shift 2 ;;
-        --device) DEVICE="$2"; shift 2 ;;
-        --mode)   MODE="$2";   shift 2 ;;
+        --tag)    [[ $# -ge 2 ]] || { echo "Error: --tag requires a value"; exit 1; }
+                  TAG="$2";    shift 2 ;;
+        --device) [[ $# -ge 2 ]] || { echo "Error: --device requires a value"; exit 1; }
+                  DEVICE="$2"; shift 2 ;;
+        --mode)   [[ $# -ge 2 ]] || { echo "Error: --mode requires a value"; exit 1; }
+                  MODE="$2";   shift 2 ;;
         --dump)   DUMP=1;      shift   ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
@@ -49,13 +52,19 @@ if [[ -z "$TAG" || -z "$DEVICE" ]]; then
     exit 1
 fi
 
+# Validate mode
+case "$MODE" in
+    default|full|crash) ;;
+    *) echo "Error: unknown --mode '$MODE' (valid: default, full, crash)"; exit 1 ;;
+esac
+
 # --- Connect to device ---
 echo "Connecting to $DEVICE..."
 "$ADB" connect "$DEVICE" 2>&1 || true
 sleep 1
 
-if ! "$ADB" devices | grep -q "^${DEVICE}[[:space:]]"; then
-    echo "Error: device $DEVICE not reachable"
+if ! "$ADB" devices | grep -F "$DEVICE" | grep -q "device$"; then
+    echo "Error: device $DEVICE not reachable or not authorized"
     "$ADB" devices
     exit 1
 fi

@@ -5,7 +5,7 @@ Run automated tests: `bash tests/run-android-tests.sh`
 
 **Status codes:** `PASS` | `FAIL` | `PENDING` | `MANUAL` | `SKIP`
 
-Last run: 2026-06-07 — 152 PASS, 0 FAIL (automated); live device: D9/D10/D11/D12/D13/D19/L9/N30/N31 PASS
+Last run: 2026-06-07 — 177 PASS, 0 FAIL (automated); live device: D9/D10/D11/D12/D13/D19/L9/N30/N31 PASS
 
 ---
 
@@ -38,6 +38,10 @@ Last run: 2026-06-07 — 152 PASS, 0 FAIL (automated); live device: D9/D10/D11/D
 | N3 | --dest only (missing --slug) → usage, exits non-zero | PASS | |
 | N4 | --dest pointing to existing path → error, exits non-zero | PASS | |
 | N5 | Unknown flag → "Unknown arg" error, exits non-zero | PASS | |
+| N5a | Slug with hyphen (my-app) → rejected, exits non-zero | PASS | Audit fix #1 |
+| N5b | Slug with uppercase (MyApp) → rejected, exits non-zero | PASS | Audit fix #1 |
+| N5c | Slug starting with digit (2app) → rejected, exits non-zero | PASS | Audit fix #1 |
+| N5d | Slug with dot (app.one) → rejected, exits non-zero | PASS | Audit fix #1 |
 
 ### Scaffolding
 | ID | Test | Status | Notes |
@@ -48,8 +52,10 @@ Last run: 2026-06-07 — 152 PASS, 0 FAIL (automated); live device: D9/D10/D11/D
 | N9 | APPSLUG replaced in AndroidManifest.xml → Theme.sensorapp | PASS | |
 | N10 | APPSLUG replaced in MainActivity.java → package com.example.sensorapp | PASS | |
 | N11 | APPSLUG replaced in strings.xml → app_name = sensorapp | PASS | |
-| N12 | Java package directory renamed APPSLUG → sensorapp | PASS | |
-| N13 | Old APPSLUG/ package dir is gone | PASS | |
+| N12 | Java package directory renamed APPSLUG → sensorapp (main) | PASS | |
+| N12b | Java package directory renamed in test/ (or absent) | PASS | Audit fix #16 |
+| N12c | Java package directory renamed in androidTest/ (or absent) | PASS | Audit fix #16 |
+| N13 | Old APPSLUG/ package dir is gone (main) | PASS | |
 | N14 | gradle-wrapper.jar NOT modified (binary excluded) — non-empty, byte count matches original | PASS | |
 | N15 | debug.keystore NOT modified (binary excluded) | PASS | |
 | N16 | git init ran; git log shows one initial commit | PASS | |
@@ -96,6 +102,8 @@ Last run: 2026-06-07 — 152 PASS, 0 FAIL (automated); live device: D9/D10/D11/D
 | D6 | Reads Groovy DSL: applicationId "com.example.foo" → PACKAGE=com.example.foo | PASS | |
 | D7 | Reads Kotlin DSL: applicationId = "com.example.foo" → PACKAGE=com.example.foo | PASS | |
 | D8 | build.gradle with no applicationId line → error, exits non-zero | PASS | |
+| D8b | Commented applicationId line is skipped | PASS | Audit fix #4 |
+| D9b | build.gradle.kts detected when build.gradle absent | PASS | Audit fix #9 |
 
 ### Local build path (requires device)
 | ID | Test | Status | Notes |
@@ -127,6 +135,7 @@ Last run: 2026-06-07 — 152 PASS, 0 FAIL (automated); live device: D9/D10/D11/D
 | L2 | Missing --tag → usage, exits non-zero | PASS | |
 | L3 | Missing --device → usage, exits non-zero | PASS | |
 | L4 | Unknown flag → "Unknown arg", exits non-zero | PASS | |
+| L4b | Invalid --mode value (e.g. typo) → error, exits non-zero | PASS | Audit fix #7 |
 
 ### Mode behaviour (requires device for full test; script construction testable without)
 | ID | Test | Status | Notes |
@@ -208,6 +217,29 @@ Last run: 2026-06-07 — 152 PASS, 0 FAIL (automated); live device: D9/D10/D11/D
 
 ---
 
+## Q — Script quality (inspection)
+
+| ID | Test | Status | Notes |
+|----|------|--------|-------|
+| Q1 | android-deploy.sh has `set -eo pipefail` | PASS | Audit fix #11 |
+| Q2 | android-logs.sh has `set -eo pipefail` | PASS | Audit fix #11 |
+| Q3 | android-new.sh has `set -eo pipefail` | PASS | Audit fix #11 |
+| Q4 | android-deploy.sh uses `grep -F` for device address check | PASS | Audit fix #12 |
+| Q5 | android-logs.sh uses `grep -F` for device address check | PASS | Audit fix #12 |
+| Q6 | android-deploy.sh verifies `device` state (not just presence in adb devices) | PASS | Audit fix #3 |
+| Q7 | android-logs.sh verifies `device` state (not just presence in adb devices) | PASS | Audit fix #3 |
+| Q8 | android-deploy.sh filters comment lines before extracting applicationId | PASS | Audit fix #4 |
+| Q9 | android-deploy.sh supports build.gradle.kts as fallback | PASS | Audit fix #9 |
+| Q10 | android-deploy.sh sig mismatch recovery only triggers on INSTALL_FAILED_UPDATE_INCOMPATIBLE | PASS | Audit fix #5 |
+| Q11 | android-deploy.sh has `trap` for CI temp dir cleanup | PASS | Audit fix #8 |
+| Q12 | android-deploy.sh has shift guards (`$# -ge 2`) on flag parsing | PASS | Audit fix #6 |
+| Q13 | android-new.sh has shift guards (`$# -ge 2`) on flag parsing | PASS | Audit fix #6 |
+| Q14 | android-new.sh validates slug format (lowercase letters/digits, starts with letter) | PASS | Audit fix #1 |
+| Q15 | android-skeleton/.gitignore has no duplicate local.properties entry | PASS | Audit fix #15 |
+| Q16 | android-new.sh quotes `$DEST` in generated CLAUDE.md deploy commands | PASS | Audit fix #14 |
+
+---
+
 ## Y — Sync check
 
 | ID | Test | Status | Notes |
@@ -241,3 +273,12 @@ Last run: 2026-06-07 — 152 PASS, 0 FAIL (automated); live device: D9/D10/D11/D
 | BUG-3 | Router mapped all log requests including "crash" to logs-dump (default filter) | Added separate logs-crash row in routing table pointing to crash-filter+dump | FIXED |
 | BUG-4 | android-deploy.sh exits 1 even on successful local deploy — `[[ -n "$CI_REPO" ]] && rm ...` last line returns 1 (empty var) with `set -e` | Changed to `if [[ -n "$CI_REPO" ]]; then rm ...; fi` | FIXED |
 | BUG-5 | android-skeleton .gitignore had `/build` (root only) — app/build/ not excluded after a build | Changed to `build/` to cover all subdirectories | FIXED |
+| BUG-6 | android-deploy.sh device check matched offline/unauthorized — `grep -q "^${DEVICE}[[:space:]]"` passes for any state | Changed to `grep -F "$DEVICE" \| grep -q "device$"` for exact state verification | FIXED |
+| BUG-7 | android-logs.sh same device check issue as BUG-6 | Same fix applied | FIXED |
+| BUG-8 | android-deploy.sh applicationId grep matched comment lines — `// applicationId` would parse incorrectly | Added `grep -v '^\s*//'` before applicationId extraction | FIXED |
+| BUG-9 | android-new.sh accepted invalid slugs (hyphens, uppercase, leading digits) — Java package names would break build | Added regex validation: `^[a-z][a-z0-9]*$` | FIXED |
+| BUG-10 | android-deploy.sh sig mismatch recovery triggered for all install errors — uninstalls app unnecessarily | Recovery now only triggers for INSTALL_FAILED_UPDATE_INCOMPATIBLE / INCONSISTENT_CERTIFICATES | FIXED |
+| BUG-11 | android-new.sh used `file` command for binary detection — unreliable on Windows Git Bash | Replaced with extension-based case statement; also fixed find\|while subshell (errors no longer swallowed) | FIXED |
+| BUG-12 | android-skeleton/.gitignore had duplicate `local.properties` entry (both `/local.properties` and `local.properties`) | Removed duplicate | FIXED |
+| BUG-13 | TableNew CLAUDE.md logs-dump used legacy `--mode dump` (implicitly not clear) | Updated to explicit `--mode default --dump` | FIXED |
+| BUG-14 | GitHub Actions workflow in android.md used @v3 actions (checkout, setup-java, upload-artifact) | Updated to @v4 | FIXED |

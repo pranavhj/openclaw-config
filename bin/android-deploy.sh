@@ -16,7 +16,7 @@
 #
 # Note: signature mismatch recovery uninstalls the app (loses app data).
 
-set -e
+set -eo pipefail
 
 ADB="/c/Users/prana/AppData/Local/Android/Sdk/platform-tools/adb.exe"
 GH="/c/Program Files/GitHub CLI/gh.exe"
@@ -28,9 +28,12 @@ DEVICE=""
 CI_REPO=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --project) PROJECT="$2"; shift 2 ;;
-        --device)  DEVICE="$2";  shift 2 ;;
-        --ci)      CI_REPO="$2"; shift 2 ;;
+        --project) [[ $# -ge 2 ]] || { echo "Error: --project requires a value"; exit 1; }
+                   PROJECT="$2"; shift 2 ;;
+        --device)  [[ $# -ge 2 ]] || { echo "Error: --device requires a value"; exit 1; }
+                   DEVICE="$2";  shift 2 ;;
+        --ci)      [[ $# -ge 2 ]] || { echo "Error: --ci requires a value"; exit 1; }
+                   CI_REPO="$2"; shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -41,13 +44,18 @@ if [[ -z "$PROJECT" || -z "$DEVICE" ]]; then
 fi
 
 # --- Read package name from build.gradle ---
-BUILD_GRADLE="$PROJECT/app/build.gradle"
-if [[ ! -f "$BUILD_GRADLE" ]]; then
-    echo "Error: $BUILD_GRADLE not found"
+BUILD_GRADLE=""
+if [[ -f "$PROJECT/app/build.gradle" ]]; then
+    BUILD_GRADLE="$PROJECT/app/build.gradle"
+elif [[ -f "$PROJECT/app/build.gradle.kts" ]]; then
+    BUILD_GRADLE="$PROJECT/app/build.gradle.kts"
+else
+    echo "Error: $PROJECT/app/build.gradle not found"
     exit 1
 fi
 # Handles both: applicationId "com.example.foo" and applicationId = "com.example.foo"
-PACKAGE=$(grep -m1 'applicationId' "$BUILD_GRADLE" | sed 's/.*applicationId[[:space:]]*=\?[[:space:]]*"\([^"]*\)".*/\1/')
+# Excludes comment lines
+PACKAGE=$(grep -v '^\s*//' "$BUILD_GRADLE" | grep -m1 'applicationId' | sed 's/.*applicationId[[:space:]]*=\?[[:space:]]*"\([^"]*\)".*/\1/')
 if [[ -z "$PACKAGE" ]]; then
     echo "Error: could not read applicationId from $BUILD_GRADLE"
     exit 1
@@ -59,16 +67,18 @@ echo "Connecting to $DEVICE..."
 "$ADB" connect "$DEVICE" 2>&1 || true
 sleep 1
 
-if ! "$ADB" devices | grep -q "^${DEVICE}[[:space:]]"; then
-    echo "Error: device $DEVICE not reachable after connect attempt"
+if ! "$ADB" devices | grep -F "$DEVICE" | grep -q "device$"; then
+    echo "Error: device $DEVICE not reachable or not authorized after connect attempt"
     "$ADB" devices
     exit 1
 fi
 
 # --- Get APK ---
+TMP_DIR=""
 if [[ -n "$CI_REPO" ]]; then
     # CI path: download from GitHub Actions
     TMP_DIR="/tmp/android-deploy-$PACKAGE"
+    trap 'rm -rf "$TMP_DIR"' EXIT
     rm -rf "$TMP_DIR" && mkdir -p "$TMP_DIR"
     echo "Finding latest successful run in $CI_REPO..."
     RUN_ID=$("$GH" run list --repo "$CI_REPO" --status success --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
@@ -95,14 +105,22 @@ fi
 
 # --- Install ---
 echo "Installing $APK on $DEVICE..."
-"$ADB" -s "$DEVICE" install -r "$APK" && echo "Done." || {
-    echo "Install failed — trying signature mismatch recovery (uninstall + reinstall, app data lost)..."
-    "$ADB" -s "$DEVICE" uninstall "$PACKAGE" || true
-    "$ADB" -s "$DEVICE" install "$APK" && echo "Done." || {
-        echo "Install failed after uninstall. Check device logs."
+INSTALL_OUT=$("$ADB" -s "$DEVICE" install -r "$APK" 2>&1)
+INSTALL_EXIT=$?
+echo "$INSTALL_OUT"
+if [[ $INSTALL_EXIT -eq 0 ]]; then
+    echo "Done."
+else
+    # Only attempt uninstall+reinstall for signature mismatch errors
+    if echo "$INSTALL_OUT" | grep -qE "INSTALL_FAILED_UPDATE_INCOMPATIBLE|INCONSISTENT_CERTIFICATES"; then
+        echo "Signature mismatch — uninstalling and reinstalling (app data will be lost)..."
+        "$ADB" -s "$DEVICE" uninstall "$PACKAGE" || true
+        "$ADB" -s "$DEVICE" install "$APK" && echo "Done." || {
+            echo "Install failed after uninstall. Check device logs."
+            exit 1
+        }
+    else
+        echo "Install failed. Check device logs."
         exit 1
-    }
-}
-
-# Cleanup CI temp dir
-if [[ -n "$CI_REPO" ]]; then rm -rf "$TMP_DIR"; fi
+    fi
+fi
