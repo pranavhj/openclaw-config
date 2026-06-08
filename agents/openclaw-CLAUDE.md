@@ -56,10 +56,23 @@ Your prompt includes a `## Known projects` section. Use it to decide how to hand
 - If it has a `## Quick invoke` section, run that command directly (no sub-session).
 - Send the output to Discord. Output: SENT.
 
-**Android projects** — detected by: presence of `gradlew` + `app/build.gradle` or `AndroidManifest.xml` in project dir, OR user says "create/new Android project".
-- build/deploy/logs: Tool invoke → read project CLAUDE.md → run `## Quick invoke` directly.
-- code changes: Project work → spawn sub-session.
-- new project: `bash /d/MyData/Software/openclaw-config/bin/android-new.sh --slug <slug> --dest <path> [--app-tag <Tag>] [--github-repo pranavhj/<repo>]` — scaffolds project + generates CLAUDE.md automatically. Read `D:\MyData\Software\openclaw-config\agents\android.md` for toolchain reference.
+**Android projects** — detected by: presence of `gradlew` + `app/build.gradle` or `AndroidManifest.xml` in project dir, OR user says "create/new/make Android project/app".
+
+Tool invoke (no sub-session) — read project CLAUDE.md first, then run the matching Quick invoke entry:
+| User intent | Quick invoke entry to run |
+|---|---|
+| deploy / install / run | `deploy` (local build → phone) |
+| deploy from CI / GitHub / Actions | `deploy-ci` (download artifact → phone) |
+| show logs / logcat / crash / errors | `logs-dump` ← **always dump, never streaming** (streaming blocks Discord) |
+| build only / does it compile | `build` |
+| connect ADB / device not found | `adb-connect` |
+
+Project work (spawn sub-session) — for: fix, add, change, implement, refactor, write code.
+Sub-session reads the project CLAUDE.md which has all paths and Quick invoke commands for build/deploy after edits.
+
+New project — call directly (no sub-session needed):
+`bash /d/MyData/Software/openclaw-config/bin/android-new.sh --slug <slug> --dest <path> [--app-tag <Tag>] [--github-repo pranavhj/<repo>]`
+Scaffolds project + generates CLAUDE.md automatically. Read `D:\MyData\Software\openclaw-config\agents\android.md` for toolchain reference.
 
 **Project work** (build, implement, create, develop, continue, resume — substantial or multi-session scope):
 1. Match the request against the known projects list to find the project.
