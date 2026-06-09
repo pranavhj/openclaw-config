@@ -141,10 +141,10 @@ else
         ! grep -A2 "# logs " "$TMP_PROJ/CLAUDE.md" | grep -q "\-\-dump" && \
         pass N27 "logs entry has no --dump" || fail N27 "logs entry incorrectly has --dump"
     N28_FAIL=0
-    for entry in "build" "deploy" "deploy-ci" "logs-dump" "logs-crash" "logs" "adb-connect"; do
+    for entry in "build" "deploy" "deploy-ci" "logs-dump" "logs-crash" "logs" "adb-connect" "test-ping" "test-inline" "test-screenshot" "test-state"; do
         grep -q "# $entry" "$TMP_PROJ/CLAUDE.md" 2>/dev/null || { fail N28 "missing quick invoke: $entry"; N28_FAIL=1; }
     done
-    [[ $N28_FAIL -eq 0 ]] && pass N28 "all 7 quick invoke entries present"
+    [[ $N28_FAIL -eq 0 ]] && pass N28 "all 11 quick invoke entries present"
     check_contains "$TMP_PROJ/CLAUDE.md" N29 "android.md"
 fi
 
@@ -250,6 +250,7 @@ echo ""
 echo "=== agents/android.md content ==="
 
 check_file "$ANDROID_MD" A1
+check_file "$ROOT/agents/android-test-engine.md" A1b
 for path in "platform-tools/adb.exe" "jdk17" "Android/Sdk" "GitHub CLI" "android-deploy" "android-logs" "android-new" "android-skeleton" "discord-send" "agent-smart"; do
     check_contains "$ANDROID_MD" A2 "$path"
 done
@@ -321,6 +322,54 @@ echo ""
 echo "=== Sync check ==="
 
 diff "$ROUTER" "$ROUTER_BACKUP" > /dev/null 2>&1 && pass Y1 "openclaw/CLAUDE.md == agents/openclaw-CLAUDE.md" || fail Y1 "FILES DIFFER — run: cp $ROUTER $ROUTER_BACKUP"
+
+echo ""
+echo "=== android-skeleton debug source set ==="
+
+check_file "$SKEL/app/src/debug/AndroidManifest.xml" SD1
+check_file "$SKEL/app/src/debug/java/com/example/APPSLUG/testing/DebugTestServer.java" SD2
+check_file "$SKEL/app/src/debug/java/com/example/APPSLUG/testing/ScriptExecutor.java" SD3
+check_file "$SKEL/app/src/debug/java/com/example/APPSLUG/testing/TestBridge.java" SD4
+check_file "$SKEL/app/src/debug/java/com/example/APPSLUG/testing/UiHelper.java" SD5
+check_file "$SKEL/app/src/debug/java/com/example/APPSLUG/testing/ScreenshotHelper.java" SD6
+check_file "$SKEL/app/src/debug/java/com/example/APPSLUG/testing/TestServerInitProvider.java" SD7
+check_contains "$SKEL/app/src/debug/AndroidManifest.xml" SD8 "INTERNET"
+check_contains "$SKEL/app/src/debug/AndroidManifest.xml" SD9 "TestServerInitProvider"
+check_contains "$SKEL/app/build.gradle" SD10 "debugImplementation.*nanohttpd"
+check_contains "$SKEL/app/build.gradle" SD11 "debugImplementation.*bsh"
+
+echo ""
+echo "=== android-new.sh debug source set rename ==="
+
+# N30: debug source set package dir renamed correctly in scaffolded project
+if [[ -d "$TMP_PROJ" ]]; then
+    [[ -d "$TMP_PROJ/app/src/debug/java/com/example/sensorapp/testing" ]] && pass N30 "debug testing dir renamed to sensorapp" || fail N30 "debug testing dir not renamed"
+    [[ ! -d "$TMP_PROJ/app/src/debug/java/com/example/APPSLUG" ]] && pass N31 "APPSLUG dir gone in debug/" || fail N31 "APPSLUG dir still exists in debug/"
+    # N32: APPSLUG replaced in debug Java files
+    debug_appslug=$(find "$TMP_PROJ/app/src/debug" -name "*.java" -exec grep -l "APPSLUG" {} \; 2>/dev/null)
+    [[ -z "$debug_appslug" ]] && pass N32 "no APPSLUG in debug Java files" || fail N32 "APPSLUG still in: $debug_appslug"
+else
+    skip N30 "debug dir rename" "scaffolded project not available"
+    skip N31 "APPSLUG dir gone" "scaffolded project not available"
+    skip N32 "APPSLUG in debug Java" "scaffolded project not available"
+fi
+
+echo ""
+echo "=== android-test.sh ==="
+
+TEST_SH="$ROOT/bin/android-test.sh"
+check_file "$TEST_SH" TS1
+grep -q "pipefail" "$TEST_SH" && pass TS2 "android-test.sh has pipefail" || fail TS2 "android-test.sh missing pipefail"
+grep -q '\$# -ge 2' "$TEST_SH" && pass TS3 "android-test.sh has shift guards" || fail TS3 "android-test.sh missing shift guards"
+bash "$TEST_SH" 2>/dev/null; [[ $? -ne 0 ]] && pass TS4 "no args exits non-zero" || fail TS4 "should exit non-zero"
+bash "$TEST_SH" --device 1.2.3.4:5555 2>/dev/null; [[ $? -ne 0 ]] && pass TS5 "no action exits non-zero" || fail TS5 "should exit non-zero with no action"
+bash "$TEST_SH" --device 1.2.3.4:5555 --unknown 2>/dev/null; [[ $? -ne 0 ]] && pass TS6 "unknown flag exits non-zero" || fail TS6 "should error on unknown flag"
+bash "$TEST_SH" --device 1.2.3.4:5555 --script /tmp/nonexistent.bsh 2>/dev/null; [[ $? -ne 0 ]] && pass TS7 "missing script file exits non-zero" || fail TS7 "should error on missing script"
+grep -q "trap" "$TEST_SH" && pass TS8 "android-test.sh has trap for cleanup" || fail TS8 "android-test.sh missing trap"
+grep -q "/ping" "$TEST_SH" && pass TS9 "android-test.sh has /ping endpoint" || fail TS9 "/ping missing"
+grep -q "/exec" "$TEST_SH" && pass TS10 "android-test.sh has /exec endpoint" || fail TS10 "/exec missing"
+grep -q "/screenshot" "$TEST_SH" && pass TS11 "android-test.sh has /screenshot endpoint" || fail TS11 "/screenshot missing"
+grep -q "/state" "$TEST_SH" && pass TS12 "android-test.sh has /state endpoint" || fail TS12 "/state missing"
 
 echo ""
 echo "=== /tmp path check ==="

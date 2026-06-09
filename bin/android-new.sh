@@ -82,7 +82,7 @@ while IFS= read -r f; do
 done < <(find "$DEST" -type f ! -name "*.jar" ! -name "*.keystore")
 
 # --- Rename Java package directories (main, test, androidTest) ---
-for SRC_TYPE in main test androidTest; do
+for SRC_TYPE in main debug test androidTest; do
     OLD_PKG_DIR="$DEST/app/src/$SRC_TYPE/java/com/example/APPSLUG"
     NEW_PKG_DIR="$DEST/app/src/$SRC_TYPE/java/com/example/$SLUG"
     [[ -d "$OLD_PKG_DIR" ]] && mv "$OLD_PKG_DIR" "$NEW_PKG_DIR"
@@ -97,12 +97,33 @@ cat > "$DEST/CLAUDE.md" <<CLAUDEMD
 
 You are running inside the $APP_TAG Android project. Do NOT do project detection or spawn sub-sessions.
 
-## Sub-session rules
-1. Skim \`PROGRESS.md\` for current state
-2. Do the work (edit files in this directory)
-3. Update \`PROGRESS.md\`
-4. Send response via \`discord-send.py\`
-5. Output: SENT
+## Sub-session rules — FOLLOW STRICTLY
+
+### Before writing ANY code (MANDATORY):
+\`\`\`bash
+# STEP 1: ALWAYS run these two commands FIRST, read their output, then proceed
+bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \\
+  --tag $APP_TAG --device 100.122.101.27:5555 --mode default --dump
+bash /d/MyData/Software/openclaw-config/bin/android-test.sh \\
+  --device 100.122.101.27:5555 --ping
+\`\`\`
+This is NOT optional. Run logs-dump + test-ping BEFORE reading or editing any source files.
+It reveals crashes, confirms what's working, and tells you if the test server is up.
+
+### Workflow:
+1. Run logs-dump + test-ping (above) — read the output
+2. Skim \`PROGRESS.md\` for current state
+3. Do the work (edit files)
+4. Deploy: run \`android-deploy.sh\` (it builds automatically — do NOT run gradlew separately)
+5. Verify: run \`test-screenshot\` to capture the result (sends screenshot to Discord if --discord flag used)
+6. Update \`PROGRESS.md\` — EVERY task, not just the first one
+7. Send response via \`discord-send.py\`
+8. Output: SENT
+
+### Common mistakes to avoid:
+- Do NOT run \`gradlew assembleDebug\` then \`android-deploy.sh\` — deploy already builds
+- Do NOT skip PROGRESS.md updates — update it after every task
+- Do NOT send text-only Discord responses after UI changes — include a screenshot
 
 Send using:
 \`\`\`
@@ -120,6 +141,7 @@ python D:\\MyData\\Software\\openclaw-config\\bin\\discord-send.py --target <tar
 | GitHub CLI | \`/c/Program Files/GitHub CLI/gh.exe\` |
 | android-deploy | \`D:\\MyData\\Software\\openclaw-config\\bin\\android-deploy.sh\` |
 | android-logs | \`D:\\MyData\\Software\\openclaw-config\\bin\\android-logs.sh\` |
+| android-test | \`D:\\MyData\\Software\\openclaw-config\\bin\\android-test.sh\` |
 | discord-send | \`D:\\MyData\\Software\\openclaw-config\\bin\\discord-send.py\` |
 
 ---
@@ -170,6 +192,22 @@ bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \\
 
 # adb-connect
 /c/Users/prana/AppData/Local/Android/Sdk/platform-tools/adb.exe connect 100.122.101.27:5555
+
+# test-ping (verify test server running)
+bash /d/MyData/Software/openclaw-config/bin/android-test.sh \\
+  --device 100.122.101.27:5555 --ping
+
+# test-inline (run BeanShell script)
+bash /d/MyData/Software/openclaw-config/bin/android-test.sh \\
+  --device 100.122.101.27:5555 --inline 'return bridge.getActivityName();'
+
+# test-screenshot (capture screen)
+bash /d/MyData/Software/openclaw-config/bin/android-test.sh \\
+  --device 100.122.101.27:5555 --screenshot /tmp/screen.png
+
+# test-state (activity + view tree)
+bash /d/MyData/Software/openclaw-config/bin/android-test.sh \\
+  --device 100.122.101.27:5555 --state
 \`\`\`
 
 ---
@@ -190,6 +228,30 @@ bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \\
 | \`adb: device offline\` | \`adb disconnect 100.122.101.27:5555 && adb connect 100.122.101.27:5555\` |
 | Signature mismatch on install | \`android-deploy.sh\` handles automatically |
 | \`NetworkOnMainThreadException\` | All network calls must be on background thread |
+| Test: \`No active activity\` | Phone screen is locked — wake + unlock first (see below) |
+| Test: ping fails after deploy | App not launched yet — \`adb shell am start -n $PACKAGE/.MainActivity\`, wait 2s |
+| Test: click works but no change | Async operation — add \`ui.sleep(2000)\` before reading result |
+
+---
+
+## Test engine notes
+
+**Phone must be unlocked** for bridge/screenshot/state. Ping and pure-compute scripts work locked.
+
+Wake + unlock via ADB:
+\`\`\`bash
+ADB="/c/Users/prana/AppData/Local/Android/Sdk/platform-tools/adb.exe"
+"\\\$ADB" -s 100.122.101.27:5555 shell input keyevent KEYCODE_WAKEUP
+sleep 1
+"\\\$ADB" -s 100.122.101.27:5555 shell input swipe 500 1500 500 500
+sleep 2
+\`\`\`
+
+Verify test server is running: check logcat for \`TestServer\` tag:
+\`\`\`bash
+bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \\
+  --tag TestServer --device 100.122.101.27:5555 --mode default --dump
+\`\`\`
 
 ## Full troubleshooting
 Read \`D:\\MyData\\Software\\openclaw-config\\agents\\android.md\`

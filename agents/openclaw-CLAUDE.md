@@ -67,6 +67,10 @@ Tool invoke (no sub-session) — read project CLAUDE.md first, then run the matc
 | show crash / exception / stacktrace | `logs-crash` ← crash-only filter + dump |
 | build only / does it compile | `build` |
 | connect ADB / device not found | `adb-connect` |
+| test / ping test server / is test running | `test-ping` |
+| run test / execute script / inline test | `test-inline` (pass script as arg) |
+| screenshot / capture screen | `test-screenshot` (save to /tmp, send to Discord) |
+| app state / what activity / view tree | `test-state` |
 
 Project work (spawn sub-session) — for: fix, add, change, implement, refactor, write code.
 Sub-session reads the project CLAUDE.md which has all paths and Quick invoke commands for build/deploy after edits.

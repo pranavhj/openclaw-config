@@ -46,4 +46,6 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test:runner:1.5.2'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    debugImplementation 'org.nanohttpd:nanohttpd:2.3.1'
+    debugImplementation 'org.apache-extras.beanshell:bsh:2.0b6'
 }

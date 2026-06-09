@@ -3,14 +3,17 @@
 
 Usage: python discord-send.py --target CHANNEL_ID --message "text"
        python discord-send.py --target CHANNEL_ID --message "text" --edit MESSAGE_ID
+       python discord-send.py --target CHANNEL_ID --message "text" --image /path/to/screenshot.png
 """
 import argparse
 import io
 import json
+import mimetypes
 import os
 import sys
 import urllib.request
 import urllib.error
+import uuid
 from pathlib import Path
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
@@ -26,6 +29,8 @@ def main():
     parser.add_argument('--message', required=True, help='Message to send')
     parser.add_argument('--edit', metavar='MESSAGE_ID', default=None,
                         help='Edit existing message (PATCH instead of POST)')
+    parser.add_argument('--image', default=None,
+                        help='Path to image file to attach')
     args = parser.parse_args()
 
     try:
@@ -57,32 +62,71 @@ def main():
         if message:
             chunks.append(message)
 
-    last_msg_id = None
-    for i, chunk in enumerate(chunks):
-        body = json.dumps({'content': chunk}).encode('utf-8')
-        url = f'https://discord.com/api/v10/channels/{args.target}/messages'
-        if args.edit:
-            url += f'/{args.edit}'
-        method = 'PATCH' if args.edit else 'POST'
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                'Authorization': f'Bot {token}',
-                'Content-Type': 'application/json',
-                'User-Agent': 'DiscordBot (https://github.com/pranavhj/openclaw-config, 1.0)',
-            },
-            method=method,
-        )
+    # Validate image if provided
+    image_path = None
+    if args.image:
+        image_path = Path(args.image)
+        if not image_path.is_file():
+            print(f'discord-send: image not found: {args.image}', file=sys.stderr)
+            sys.exit(1)
 
+    base_url = f'https://discord.com/api/v10/channels/{args.target}/messages'
+    base_headers = {
+        'Authorization': f'Bot {token}',
+        'User-Agent': 'DiscordBot (https://github.com/pranavhj/openclaw-config, 1.0)',
+    }
+
+    def _send_json(content, edit_id=None):
+        """Send a text-only message (JSON body)."""
+        url = base_url + (f'/{edit_id}' if edit_id else '')
+        method = 'PATCH' if edit_id else 'POST'
+        body = json.dumps({'content': content}).encode('utf-8')
+        headers = {**base_headers, 'Content-Type': 'application/json'}
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        return _do_request(req)
+
+    def _send_multipart(content, img_path):
+        """Send a message with an image attachment (multipart/form-data)."""
+        boundary = uuid.uuid4().hex
+        filename = img_path.name
+        mime_type = mimetypes.guess_type(str(img_path))[0] or 'application/octet-stream'
+
+        parts = []
+        # Part 1: payload_json
+        parts.append(
+            f'--{boundary}\r\n'
+            f'Content-Disposition: form-data; name="payload_json"\r\n'
+            f'Content-Type: application/json\r\n\r\n'
+            f'{json.dumps({"content": content})}\r\n'
+        )
+        # Part 2: file
+        parts.append(
+            f'--{boundary}\r\n'
+            f'Content-Disposition: form-data; name="files[0]"; filename="{filename}"\r\n'
+            f'Content-Type: {mime_type}\r\n\r\n'
+        )
+        file_data = img_path.read_bytes()
+        closing = f'\r\n--{boundary}--\r\n'
+
+        body = b''.join([
+            parts[0].encode('utf-8'),
+            parts[1].encode('utf-8'),
+            file_data,
+            closing.encode('utf-8'),
+        ])
+
+        headers = {**base_headers, 'Content-Type': f'multipart/form-data; boundary={boundary}'}
+        req = urllib.request.Request(base_url, data=body, headers=headers, method='POST')
+        return _do_request(req)
+
+    def _do_request(req):
+        """Execute HTTP request, return message ID or exit on error."""
         try:
             with urllib.request.urlopen(req) as resp:
                 resp_body = resp.read()
                 if resp.status == 200:
                     data = json.loads(resp_body)
-                    msg_id = data.get('id', '')
-                    if msg_id:
-                        last_msg_id = msg_id
+                    return data.get('id', '')
                 else:
                     print(f'discord-send: HTTP {resp.status}', file=sys.stderr)
                     sys.exit(1)
@@ -92,6 +136,19 @@ def main():
         except urllib.error.URLError as e:
             print(f'discord-send: connection error: {e.reason}', file=sys.stderr)
             sys.exit(1)
+
+    last_msg_id = None
+
+    if image_path:
+        # Image mode: send all text + image in one message (no chunking for image messages)
+        msg_id = _send_multipart(args.message[:MAX_LEN], image_path)
+        if msg_id:
+            last_msg_id = msg_id
+    else:
+        for i, chunk in enumerate(chunks):
+            msg_id = _send_json(chunk, edit_id=args.edit if args.edit else None)
+            if msg_id:
+                last_msg_id = msg_id
 
     if last_msg_id:
         print(f'MSG_ID:{last_msg_id}')

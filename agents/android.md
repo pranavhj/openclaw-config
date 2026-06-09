@@ -17,6 +17,7 @@ read this file — paths are inlined in each project's CLAUDE.md for zero-overhe
 | android-deploy script | `D:\MyData\Software\openclaw-config\bin\android-deploy.sh` |
 | android-logs script | `D:\MyData\Software\openclaw-config\bin\android-logs.sh` |
 | android-new script | `D:\MyData\Software\openclaw-config\bin\android-new.sh` |
+| android-test script | `D:\MyData\Software\openclaw-config\bin\android-test.sh` |
 | android-skeleton | `D:\MyData\Software\openclaw-config\android-skeleton\` |
 | discord-send | `D:\MyData\Software\openclaw-config\bin\discord-send.py` |
 | agent-smart | `D:\MyData\Software\openclaw-config\bin\agent-smart.py` |
@@ -142,6 +143,21 @@ bash /d/MyData/Software/openclaw-config/bin/android-new.sh \
 Copies `android-skeleton/`, replaces `APPSLUG` placeholder, renames package dir, runs `git init`.
 After running: add `CLAUDE.md` from the router's Android template, then build to verify.
 
+### android-test.sh (embedded test engine)
+
+Debug builds embed a NanoHTTPD + BeanShell test server (port 8973). Auto-starts via ContentProvider.
+Phone must be unlocked for UI operations. Full docs: `agents/android-test-engine.md`.
+
+```bash
+bash android-test.sh --device 100.122.101.27:5555 --ping           # health check
+bash android-test.sh --device 100.122.101.27:5555 --inline 'return bridge.getActivityName();'
+bash android-test.sh --device 100.122.101.27:5555 --screenshot /tmp/screen.png
+bash android-test.sh --device 100.122.101.27:5555 --state          # view tree
+```
+
+Key gotchas: wake phone first (`input keyevent KEYCODE_WAKEUP` + swipe), use `ui.sleep()` after
+clicks for async ops, check logcat tag `TestServer` to verify server started.
+
 ---
 
 ## Deploy modes: local vs CI
@@ -166,101 +182,32 @@ After running: add `CLAUDE.md` from the router's Android template, then build to
 ├── debug.keystore        # committed, shared creds
 └── app/
     ├── build.gradle      # applicationId, minSdk, dependencies
-    └── src/main/
-        ├── AndroidManifest.xml
-        ├── java/com/example/<slug>/
-        │   └── MainActivity.java
-        └── res/
-            ├── layout/activity_main.xml
-            ├── values/{strings,colors,themes}.xml
-            └── mipmap-anydpi-v26/{ic_launcher,ic_launcher_round}.xml
+    ├── src/main/
+    │   ├── AndroidManifest.xml
+    │   ├── java/com/example/<slug>/
+    │   │   └── MainActivity.java
+    │   └── res/
+    │       ├── layout/activity_main.xml
+    │       ├── values/{strings,colors,themes}.xml
+    │       └── mipmap-anydpi-v26/{ic_launcher,ic_launcher_round}.xml
+    └── src/debug/            # debug-only test engine (not in release)
+        ├── AndroidManifest.xml   # INTERNET permission + provider
+        └── java/com/example/<slug>/testing/
+            ├── DebugTestServer.java
+            ├── ScriptExecutor.java
+            ├── TestBridge.java
+            ├── UiHelper.java
+            ├── ScreenshotHelper.java
+            └── TestServerInitProvider.java
 ```
 
 ---
 
-## app/build.gradle template
+## Templates
 
-```groovy
-plugins {
-    id 'com.android.application'
-}
-
-android {
-    namespace 'com.example.SLUG'
-    compileSdk 34
-
-    defaultConfig {
-        applicationId "com.example.SLUG"
-        minSdk 24
-        targetSdk 34
-        versionCode 1
-        versionName "1.0"
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-    }
-
-    signingConfigs {
-        debug {
-            storeFile file("${rootProject.projectDir}/debug.keystore")
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
-        }
-    }
-
-    buildTypes {
-        debug { signingConfig signingConfigs.debug }
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
-    }
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-    }
-}
-
-dependencies {
-    implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test:runner:1.5.2'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
-}
-```
-
----
-
-## GitHub Actions workflow template
-
-Save as `.github/workflows/build.yml`:
-
-```yaml
-name: Build APK
-
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-      - name: Build debug APK
-        run: ./gradlew assembleDebug
-      - uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 7
-```
+`app/build.gradle` template is in the skeleton: `android-skeleton/app/build.gradle`.
+GitHub Actions workflow template: save `.github/workflows/build.yml` — uses `actions/checkout@v4`,
+`actions/setup-java@v4` (java 17, temurin), `./gradlew assembleDebug`, upload artifact `app-debug`.
 
 ---
 
