@@ -22,6 +22,26 @@ if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 DELEGATE_PY = Path(__file__).parent / 'delegate.py'
+LOCKFILE = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'openclaw' / 'discord-bot.lock'
+
+# --- Single-instance guard: exit cleanly if another bot is already running ---
+LOCKFILE.parent.mkdir(parents=True, exist_ok=True)
+if sys.platform == 'win32':
+    import msvcrt
+    try:
+        _lock_fh = open(LOCKFILE, 'w')
+        msvcrt.locking(_lock_fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except (OSError, IOError):
+        print('discord-bot: another instance is already running — exiting.', file=sys.stderr)
+        sys.exit(0)
+else:
+    import fcntl
+    try:
+        _lock_fh = open(LOCKFILE, 'w')
+        fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, IOError):
+        print('discord-bot: another instance is already running — exiting.', file=sys.stderr)
+        sys.exit(0)
 
 logging.basicConfig(
     level=logging.INFO,
