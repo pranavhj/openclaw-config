@@ -401,7 +401,21 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
                 tl({'ts': ts_stop, 'event': 'stop_signal_detected'})
                 log('stop signal detected — terminating agent')
                 was_stopped = True
-                proc.terminate()
+                # Kill entire process tree (agent-smart → cmd.exe → claude)
+                if sys.platform == 'win32':
+                    try:
+                        subprocess.run(
+                            ['taskkill', '/PID', str(proc.pid), '/T', '/F'],
+                            capture_output=True, timeout=10,
+                        )
+                    except Exception:
+                        proc.kill()
+                else:
+                    import signal
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                    except Exception:
+                        proc.kill()
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
