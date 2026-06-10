@@ -50,6 +50,7 @@ _status_events = collections.deque(maxlen=20)
 _last_edit_ts = 0.0
 _active_session = None
 _session_start_mono = 0.0
+_recent_msg_ids = collections.deque(maxlen=50)
 
 
 def project_label(filepath):
@@ -214,12 +215,12 @@ async def watch_claude_sessions():
             prev_session = _active_session
             try:
                 session_data = json.loads(ACTIVE_SESSION_FILE.read_text(encoding='utf-8'))
-                # Max-age guard: clean up stale files (>30 min)
+                # Max-age guard: clean up stale files (>2 hours)
                 ts_start = session_data.get('ts_start', '')
                 if ts_start:
                     try:
                         dt = datetime.fromisoformat(ts_start.replace('Z', '+00:00'))
-                        if (datetime.now(timezone.utc) - dt).total_seconds() > 1800:
+                        if (datetime.now(timezone.utc) - dt).total_seconds() > 7200:
                             ACTIVE_SESSION_FILE.unlink(missing_ok=True)
                             session_data = None
                     except (ValueError, OSError):
@@ -359,6 +360,12 @@ async def on_message(message):
     if not isinstance(message.channel, discord.DMChannel):
         log.info('ignored non-dm author=%s channel_type=%s', message.author.id, type(message.channel).__name__)
         return
+
+    # Deduplicate: Discord gateway may deliver the same message multiple times
+    if message.id in _recent_msg_ids:
+        log.info('ignored duplicate message id=%s', message.id)
+        return
+    _recent_msg_ids.append(message.id)
 
     content = message.content.replace('\n', ' ')
 

@@ -227,8 +227,9 @@ def main():
                     'project': 'openclaw',
                     'ts_start': ts_recv,
                 }), encoding='utf-8')
-        except Exception:
-            pass
+        except Exception as e:
+            log(f'status message send failed: {e}')
+            tl({'ts': ts_ms(), 'event': 'status_send_failed', 'error': str(e)})
 
         _was_cancelled = _run(channel, target, message, today, log_file, tl_log, ts_recv, orig_len, sanitized_len, t0, tl, log)
     finally:
@@ -393,7 +394,8 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
             env=agent_env,
         )
 
-        # Poll for stop signal while process runs
+        # Poll for stop signal while process runs; refresh active-session periodically
+        _poll_count = 0
         while proc.poll() is None:
             if STOP_SIGNAL_FILE.exists():
                 ts_stop = ts_ms()
@@ -407,6 +409,15 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
                     proc.kill()
                     proc.wait()
                 break
+            # Refresh active-session.json every ~60s to prevent stale-guard cleanup
+            _poll_count += 1
+            if _poll_count % 120 == 0 and ACTIVE_SESSION_FILE.exists():
+                try:
+                    sd = json.loads(ACTIVE_SESSION_FILE.read_text(encoding='utf-8'))
+                    sd['ts_start'] = ts_ms()
+                    ACTIVE_SESSION_FILE.write_text(json.dumps(sd), encoding='utf-8')
+                except Exception:
+                    pass
             time.sleep(0.5)
 
         stdout, stderr = proc.communicate(timeout=5)

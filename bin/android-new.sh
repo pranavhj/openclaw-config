@@ -208,6 +208,11 @@ bash /d/MyData/Software/openclaw-config/bin/android-test.sh \\
 # test-state (activity + view tree)
 bash /d/MyData/Software/openclaw-config/bin/android-test.sh \\
   --device 100.122.101.27:5555 --state
+
+# wake-unlock (wake phone + swipe to unlock — required before UI tests)
+ADB="/c/Users/prana/AppData/Local/Android/Sdk/platform-tools/adb.exe" && \\
+  "\\\$ADB" -s 100.122.101.27:5555 shell input keyevent KEYCODE_WAKEUP && sleep 1 && \\
+  "\\\$ADB" -s 100.122.101.27:5555 shell input swipe 500 1500 500 500
 \`\`\`
 
 ---
