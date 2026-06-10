@@ -103,7 +103,8 @@ Your answer will arrive as the next message — you will resume this session wit
 Do NOT output responses as stdout — they will not be forwarded.
 
 ## Critical rules for headless execution
-- Do NOT call EnterPlanMode or ExitPlanMode — you are running non-interactively, there is no human to approve the plan. Think in your head and execute immediately.
+- You MAY use EnterPlanMode to explore and plan. But do NOT call ExitPlanMode — it requires a terminal keypress that will never come.
+- Instead: when your plan is ready, send it to Discord via discord-send.py, output SENT, and stop. The user will reply with approval and you will resume via --continue.
 - If you get stuck, hit an error, or cannot proceed for any reason — send a Discord message explaining what happened BEFORE stopping. Never exit silently.
 
 ## Request
