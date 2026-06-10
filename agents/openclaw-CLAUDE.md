@@ -102,6 +102,10 @@ If you need clarification before proceeding, send your question via discord-send
 Your answer will arrive as the next message — you will resume this session with full history via --continue.
 Do NOT output responses as stdout — they will not be forwarded.
 
+## Critical rules for headless execution
+- Do NOT call EnterPlanMode or ExitPlanMode — you are running non-interactively, there is no human to approve the plan. Think in your head and execute immediately.
+- If you get stuck, hit an error, or cannot proceed for any reason — send a Discord message explaining what happened BEFORE stopping. Never exit silently.
+
 ## Request
 <user's full message verbatim>")
 ```
