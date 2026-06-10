@@ -99,15 +99,15 @@ You are running inside the $APP_TAG Android project. Do NOT do project detection
 
 ## Sub-session rules — FOLLOW STRICTLY
 
-### Before writing ANY code (MANDATORY):
+### Before writing ANY code (on fresh/new sessions):
 \`\`\`bash
-# STEP 1: ALWAYS run these two commands FIRST, read their output, then proceed
+# STEP 1: Run these two commands FIRST, read their output, then proceed
 bash /d/MyData/Software/openclaw-config/bin/android-logs.sh \\
   --tag $APP_TAG --device 100.122.101.27:5555 --mode default --dump
 bash /d/MyData/Software/openclaw-config/bin/android-test.sh \\
   --device 100.122.101.27:5555 --ping
 \`\`\`
-This is NOT optional. Run logs-dump + test-ping BEFORE reading or editing any source files.
+Run logs-dump + test-ping on fresh sessions. Skip if you JUST deployed/verified in this same session.
 It reveals crashes, confirms what's working, and tells you if the test server is up.
 
 ### Workflow:

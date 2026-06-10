@@ -250,6 +250,12 @@ async def watch_claude_sessions():
                     if prev_session is None:
                         _session_start_mono = time.monotonic()
                         _status_events.clear()
+                        # Re-seed all file positions so we only track new writes from this session
+                        for p in glob.glob(f'{CLAUDE_PROJECTS_DIR}/**/*.jsonl', recursive=True):
+                            try:
+                                file_positions[p] = os.path.getsize(p)
+                            except OSError:
+                                pass
                 elif prev_session is not None:
                     elapsed = int(time.monotonic() - _session_start_mono)
                     await _edit_status(prev_session, elapsed, done=True)
@@ -282,13 +288,9 @@ async def watch_claude_sessions():
 
                 last = file_positions.get(path)
                 if last is None:
-                    if _active_session:
-                        # Active session: new file likely from compaction — read from start
-                        file_positions[path] = 0
-                    else:
-                        # No active session: seed at current end to skip old content
-                        file_positions[path] = size
-                        continue
+                    # Seed at current end — only process truly new data written after this point
+                    file_positions[path] = size
+                    continue
 
                 if size <= last:
                     continue
