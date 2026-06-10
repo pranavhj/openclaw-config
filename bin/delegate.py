@@ -365,6 +365,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
 
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     agent_env = {k: v for k, v in os.environ.items() if k != 'CLAUDECODE'}
+    agent_env['DISCORD_TARGET'] = target  # sub-sessions can call discord-send.py --target $DISCORD_TARGET
 
     # Write prompt to a temp file — avoids cmd.exe newline-splitting when
     # passing multi-line strings via shell=True on Windows.

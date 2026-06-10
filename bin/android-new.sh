@@ -127,7 +127,7 @@ It reveals crashes, confirms what's working, and tells you if the test server is
 
 Send using:
 \`\`\`
-python D:\\MyData\\Software\\openclaw-config\\bin\\discord-send.py --target <target> --message "<text>"
+python D:\\MyData\\Software\\openclaw-config\\bin\\discord-send.py --target \$DISCORD_TARGET --message "<text>"
 \`\`\`
 
 ---
