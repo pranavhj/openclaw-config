@@ -102,6 +102,13 @@ If you need clarification before proceeding, send your question via discord-send
 Your answer will arrive as the next message — you will resume this session with full history via --continue.
 Do NOT output responses as stdout — they will not be forwarded.
 
+## Status updates
+Send a brief Discord message before each major phase so the user knows progress:
+- Before starting large code changes: "Starting [phase] — [short description]"
+- After build succeeds or fails
+- Before deploying to device
+- When done (with screenshot if UI changed)
+
 ## Critical rules for headless execution
 - You MAY use EnterPlanMode to explore and plan. But do NOT call ExitPlanMode — it requires a terminal keypress that will never come.
 - Instead: when your plan is ready, send it to Discord via discord-send.py, output SENT, and stop. The user will reply with approval and you will resume via --continue.
