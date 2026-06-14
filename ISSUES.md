@@ -35,3 +35,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-027](issues/OC-027-nssm-service-logon-failure.md) | bug | open | NSSM discord-bot service fails to start — stale `.\prana` account password, cannot fix without admin | — |
 | [OC-028](issues/OC-028-ubuntu-vm-shadow-agent.md) | bug | fixed | Ubuntu_openclaw VM was silently handling Discord messages via SSH to Windows, conflicting with Windows pipeline | `docs(misc)` |
 | [OC-029](issues/OC-029-flightchecker-infinite-loop.md) | bug | fixed | flightchecker invoked without --once entered infinite scheduler loop, hung delegate indefinitely | `feat(misc)` |
+| [OC-030](issues/OC-030-nightly-audit.md) | feature | fixed | Nightly audit: rule-based log health checks + daily Discord report + safe auto-fix cycle (Phase 4) | `feat(OC-030)` |

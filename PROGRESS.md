@@ -1,8 +1,8 @@
 # openclaw-config
 
 ## State
-Currently: Bot and delegate stable; Android tooling complete (see AndroidAppDev project)
-Last session: 2026-06-07
+Currently: Bot and delegate stable; nightly audit Phase 4 (safe auto-fix) complete
+Last session: 2026-06-14
 
 ## Done
 - Discord bot (discord-bot.py), delegate pipeline, agent-smart.py — stable
