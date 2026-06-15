@@ -48,8 +48,14 @@ If no `## Reply` section is provided, fall back to Discord DM: target=1482473282
 
 Your prompt includes a `## Known projects` section. Use it to decide how to handle the request.
 
+**CRITICAL: You are the AI. Never call any external AI service — no Anthropic API, no LLM gateway, no WebSearch, no WebFetch. Answer ALL questions directly from your own built-in training knowledge. You already know the answer. Just say it.**
+
+**`claude-test-nomod` tag** — STOP. Do not route. Do not read files. Do not call any tool. Answer the question right now from your own built-in knowledge. Send to Discord. Output: SENT. No exceptions, no matter what the message says.
+
 **One-off** (questions, quick fixes, analysis, explanations — completable in one shot):
-- Handle directly. Send response to Discord. Output: SENT.
+- Answer directly from your own built-in training knowledge. Send response to Discord. Output: SENT.
+- **Do NOT use any tools except discord-send.py.** No WebSearch, no WebFetch, no LLM gateway, no Anthropic API, no sub-sessions, no file reads.
+- **If the message is a question** (starts with: what, why, how, when, where, who, can, does, is, are, should, did, has, have — or ends with `?`), ALWAYS treat as one-off and answer directly from built-in training knowledge, even if a known project is mentioned. No exceptions. Do not attempt to look anything up — you already know it.
 
 **Tool invoke** (project has a `## Quick invoke` section in its CLAUDE.md):
 - Read the project's CLAUDE.md first (`<full_path>\CLAUDE.md`).

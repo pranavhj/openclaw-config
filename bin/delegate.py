@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """delegate.py — orchestrate a Discord message through the Claude pipeline.
 
-Usage: python delegate.py CHANNEL TARGET MESSAGE...
+Usage: python delegate.py CHANNEL TARGET [--slug SLUG] MESSAGE...
   CHANNEL  — channel type (e.g. 'discord')
   TARGET   — Discord channel ID to reply to
+  --slug   — project slug for per-project concurrency (default: 'default')
   MESSAGE  — message text (remaining args joined with spaces)
 """
 import glob
@@ -152,19 +153,26 @@ def parse_history(log_lines: list) -> str:
 
 def main():
     if len(sys.argv) < 3:
-        print('Usage: delegate.py CHANNEL TARGET [MESSAGE...]', file=sys.stderr)
+        print('Usage: delegate.py CHANNEL TARGET [--slug SLUG] [MESSAGE...]', file=sys.stderr)
         sys.exit(1)
 
     channel = sys.argv[1]
     target = sys.argv[2]
-    message = ' '.join(sys.argv[3:])
+
+    # Parse optional --slug argument
+    remaining = sys.argv[3:]
+    slug = 'default'
+    if len(remaining) >= 2 and remaining[0] == '--slug':
+        slug = remaining[1]
+        remaining = remaining[2:]
+    message = ' '.join(remaining)
     t0 = time.monotonic()
 
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     LOGDIR.mkdir(parents=True, exist_ok=True)
-    log_file = LOGDIR / f'delegate-{today}.log'
-    tl_log   = LOGDIR / f'timeline-{today}.log'
-    lock_dir = LOGDIR / 'delegate.lock'
+    log_file = LOGDIR / f'delegate-{slug}-{today}.log'
+    tl_log   = LOGDIR / f'timeline-{slug}-{today}.log'
+    lock_dir = LOGDIR / f'delegate-{slug}.lock'
 
     ts_recv = ts_ms()
 
@@ -190,26 +198,76 @@ def main():
     tl({'ts': ts_ms(), 'event': 'sanitize', 'orig_len': orig_len,
         'sanitized_len': sanitized_len, 'chars_replaced': chars_replaced})
 
-    # --- Lock: prevent duplicate concurrent runs ---
+    # --- Per-slug active session file ---
+    active_session_file = LOGDIR / f'active-session-{slug}.json'
+
+    # --- Lock: prevent duplicate concurrent runs (per-slug) ---
+    def _is_pid_alive(pid):
+        """Check if a process is still running."""
+        try:
+            if sys.platform == 'win32':
+                r = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH'],
+                                   capture_output=True, text=True, timeout=5)
+                return str(pid) in r.stdout
+            else:
+                os.kill(pid, 0)
+                return True
+        except Exception:
+            return False
+
     try:
         lock_dir.mkdir(exist_ok=False)
     except FileExistsError:
-        ts_blocked = ts_ms()
-        tl({'ts': ts_blocked, 'event': 'lock_blocked', 'msg': 'duplicate run detected'})
-        log(f'lock_blocked: duplicate run at {ts_blocked}')
-        discord_send(channel, target,
-                     'Still working on a previous task \u2014 please resend in a moment.\n-# sent by delegate')
-        print('SENT')
-        return
+        # Check if the PID that holds the lock is still alive
+        pid_file = lock_dir / 'pid'
+        stale = False
+        try:
+            if pid_file.exists():
+                old_pid = int(pid_file.read_text().strip())
+                if not _is_pid_alive(old_pid):
+                    stale = True
+        except Exception:
+            stale = True  # can't read PID → assume stale
+
+        if stale:
+            # Break stale lock
+            try:
+                pid_file.unlink(missing_ok=True)
+                lock_dir.rmdir()
+                lock_dir.mkdir(exist_ok=False)
+            except Exception:
+                pass  # fall through to blocked message if cleanup fails
+            else:
+                tl({'ts': ts_ms(), 'event': 'stale_lock_broken', 'slug': slug})
+                # Lock acquired after breaking stale lock — fall through to main logic
+                stale = 'acquired'
+
+        if stale != 'acquired':
+            ts_blocked = ts_ms()
+            tl({'ts': ts_blocked, 'event': 'lock_blocked', 'slug': slug, 'msg': 'duplicate run detected'})
+            log(f'lock_blocked: duplicate run for slug={slug} at {ts_blocked}')
+            discord_send(channel, target,
+                         f'Still working on `{slug}` \u2014 please resend in a moment.\n-# sent by delegate')
+            print('SENT')
+            return
 
     status_msg_id = None  # declared here so finally block can access it
 
+    # Write PID to lock dir for stale-lock detection
+    try:
+        (lock_dir / 'pid').write_text(str(os.getpid()), encoding='utf-8')
+    except Exception:
+        pass
+
+    # Per-slug stop signal
+    stop_signal_file = LOGDIR / f'stop-{slug}.signal'
+
     _was_cancelled = False
     try:
-        tl({'ts': ts_ms(), 'event': 'lock_acquired'})
-        print(f'delegation started \u2014 log: {log_file}')
+        tl({'ts': ts_ms(), 'event': 'lock_acquired', 'slug': slug})
+        print(f'delegation started (slug={slug}) \u2014 log: {log_file}')
 
-        # Send "Working…" status message; write active-session.json for live progress display
+        # Send "Working…" status message; write active-session-<slug>.json for live progress display
         try:
             send_result = subprocess.run(
                 [sys.executable, str(DISCORD_SEND_PY), '--target', target,
@@ -221,17 +279,19 @@ def main():
                 if line.startswith('MSG_ID:'):
                     status_msg_id = line[7:].strip()
             if status_msg_id:
-                ACTIVE_SESSION_FILE.write_text(json.dumps({
+                active_session_file.write_text(json.dumps({
                     'target': target,
                     'status_message_id': status_msg_id,
-                    'project': 'openclaw',
+                    'project': slug,
+                    'slug': slug,
+                    'cwd_label': WORK_DIR.name,  # JSONL project_label for watcher matching
                     'ts_start': ts_recv,
                 }), encoding='utf-8')
         except Exception as e:
             log(f'status message send failed: {e}')
             tl({'ts': ts_ms(), 'event': 'status_send_failed', 'error': str(e)})
 
-        _was_cancelled = _run(channel, target, message, today, log_file, tl_log, ts_recv, orig_len, sanitized_len, t0, tl, log)
+        _was_cancelled = _run(channel, target, message, today, log_file, tl_log, ts_recv, orig_len, sanitized_len, t0, tl, log, slug, stop_signal_file, active_session_file)
     finally:
         # Edit status message to "Done" or "Cancelled" before cleanup
         if status_msg_id:
@@ -250,7 +310,11 @@ def main():
             except Exception:
                 pass
         try:
-            ACTIVE_SESSION_FILE.unlink(missing_ok=True)
+            active_session_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            (lock_dir / 'pid').unlink(missing_ok=True)
         except Exception:
             pass
         try:
@@ -259,9 +323,36 @@ def main():
             pass
 
 
+def _kill_proc_tree(proc):
+    """Kill a subprocess and its entire process tree."""
+    if sys.platform == 'win32':
+        try:
+            subprocess.run(
+                ['taskkill', '/PID', str(proc.pid), '/T', '/F'],
+                capture_output=True, timeout=10,
+            )
+        except Exception:
+            proc.kill()
+    else:
+        import signal
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except Exception:
+            proc.kill()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
 def _run(channel, target, message, today, log_file, tl_log, ts_recv,
-         orig_len, sanitized_len, t0, tl, log):
+         orig_len, sanitized_len, t0, tl, log, slug='default', stop_signal_file=None, active_session_file=None):
     """Run the agent pipeline. Returns True if execution was cancelled via stop signal."""
+    if stop_signal_file is None:
+        stop_signal_file = LOGDIR / f'stop-{slug}.signal'
+    if active_session_file is None:
+        active_session_file = LOGDIR / f'active-session-{slug}.json'
 
     # --- Discover projects ---
     # Scan multiple roots; include full path so Claude can cd to the right dir.
@@ -307,32 +398,33 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     log(f'msg_len: {orig_len} (sanitized: {sanitized_len})')
     log(f'projects: {projects_str}')
 
-    tl({'ts': ts_ms(), 'event': 'project_match', 'project': 'openclaw',
-        'work_dir': str(WORK_DIR).replace('\\', '/')})
+    tl({'ts': ts_ms(), 'event': 'project_match', 'project': slug,
+        'work_dir': str(WORK_DIR).replace('\\', '/'), 'slug': slug})
 
-    # --- Recent message history (last few prior messages) ---
+    # --- Recent message history (read ALL per-slug timeline files for unified context) ---
     yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d')
-    yesterday_log = LOGDIR / f'timeline-{yesterday}.log'
-    today_log = tl_log
 
     log_lines = []
     today_count = 0
-    if today_log.exists():
+    # Glob all timeline files for today (all slugs)
+    for tl_path in sorted(LOGDIR.glob(f'timeline-*-{today}.log')):
         try:
-            lines = today_log.read_text(encoding='utf-8', errors='replace').splitlines()
-            today_count = sum(
+            lines = tl_path.read_text(encoding='utf-8', errors='replace').splitlines()
+            today_count += sum(
                 1 for l in lines
                 if '"event":"delegate_recv"' in l or '"event": "delegate_recv"' in l
             )
-            log_lines = lines
+            log_lines.extend(lines)
         except Exception:
             pass
-    if today_count < 3 and yesterday_log.exists():
-        try:
-            prev = yesterday_log.read_text(encoding='utf-8', errors='replace').splitlines()
-            log_lines = prev + log_lines
-        except Exception:
-            pass
+    # If not enough context today, also load yesterday's files
+    if today_count < 3:
+        for tl_path in sorted(LOGDIR.glob(f'timeline-*-{yesterday}.log')):
+            try:
+                prev = tl_path.read_text(encoding='utf-8', errors='replace').splitlines()
+                log_lines = prev + log_lines
+            except Exception:
+                pass
 
     history = parse_history(log_lines)
 
@@ -369,22 +461,36 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
 
     # Write prompt to a temp file — avoids cmd.exe newline-splitting when
     # passing multi-line strings via shell=True on Windows.
-    prompt_file = LOGDIR / f'delegate-prompt-{ts_recv.replace(":", "-").replace(".", "-")}.txt'
+    prompt_file = LOGDIR / f'delegate-prompt-{slug}-{ts_recv.replace(":", "-").replace(".", "-")}.txt'
     prompt_file.write_text(prompt, encoding='utf-8')
 
     # Clean up any stale stop signal from previous run
+    try:
+        stop_signal_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    # Also clean global stop signal (backwards compat with discord-bot stop command)
     try:
         STOP_SIGNAL_FILE.unlink(missing_ok=True)
     except Exception:
         pass
 
+    # Router gets a short hard timeout (2 min) — it should only answer+route, not do work.
+    # Sub-sessions spawned by the router run independently and have their own timeouts.
+    MAX_AGENT_SECONDS = 120 if slug in ('router', 'default') else 1800
     was_stopped = False
+    _timed_out = False
+    _warned_slow = False
     try:
+        # Router (slug='router' or 'default') is stateless — no --continue.
+        # Sub-sessions spawned by router use --continue in their own CWDs.
+        agent_cmd = [sys.executable, str(AGENT_SMART_PY)]
+        if slug not in ('router', 'default'):
+            agent_cmd.append('--continue')
+        agent_cmd.extend(['--permission-mode', 'bypassPermissions',
+                          '--model', 'sonnet', '--print-file', str(prompt_file)])
         proc = subprocess.Popen(
-            [sys.executable, str(AGENT_SMART_PY),
-             '--continue',
-             '--permission-mode', 'bypassPermissions',
-             '--model', 'sonnet', '--print-file', str(prompt_file)],
+            agent_cmd,
             cwd=str(WORK_DIR),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -394,42 +500,44 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
             env=agent_env,
         )
 
-        # Poll for stop signal while process runs; refresh active-session periodically
+        # Poll for stop signal / timeout while process runs
         _poll_count = 0
+        _agent_start_mono = time.monotonic()
+        # Warn user if router takes >60s (sub-sessions run independently, so skip warning for those)
+        WARN_SLOW_SECONDS = 60
         while proc.poll() is None:
-            if STOP_SIGNAL_FILE.exists():
+            # Check stop signals
+            if stop_signal_file.exists() or STOP_SIGNAL_FILE.exists():
                 ts_stop = ts_ms()
                 tl({'ts': ts_stop, 'event': 'stop_signal_detected'})
                 log('stop signal detected — terminating agent')
                 was_stopped = True
-                # Kill entire process tree (agent-smart → cmd.exe → claude)
-                if sys.platform == 'win32':
-                    try:
-                        subprocess.run(
-                            ['taskkill', '/PID', str(proc.pid), '/T', '/F'],
-                            capture_output=True, timeout=10,
-                        )
-                    except Exception:
-                        proc.kill()
-                else:
-                    import signal
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                    except Exception:
-                        proc.kill()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
+                _kill_proc_tree(proc)
                 break
-            # Refresh active-session.json every ~60s to prevent stale-guard cleanup
+            # Slow-warning: router taking too long (sub-sessions are silent by design)
+            elapsed_agent = time.monotonic() - _agent_start_mono
+            if not _warned_slow and slug in ('router', 'default') and elapsed_agent > WARN_SLOW_SECONDS:
+                _warned_slow = True
+                tl({'ts': ts_ms(), 'event': 'slow_warning', 'elapsed_s': int(elapsed_agent)})
+                discord_send(channel, target,
+                             '\u23f3 Still thinking\u2026 (router is taking longer than usual)\n-# sent by delegate')
+            # Check max duration timeout
+            if elapsed_agent > MAX_AGENT_SECONDS:
+                ts_timeout = ts_ms()
+                tl({'ts': ts_timeout, 'event': 'max_duration_exceeded',
+                    'elapsed_s': int(elapsed_agent), 'limit_s': MAX_AGENT_SECONDS})
+                log(f'max duration exceeded ({int(elapsed_agent)}s > {MAX_AGENT_SECONDS}s) — killing agent')
+                was_stopped = True
+                _timed_out = True
+                _kill_proc_tree(proc)
+                break
+            # Refresh active-session file every ~60s to prevent stale-guard cleanup
             _poll_count += 1
-            if _poll_count % 120 == 0 and ACTIVE_SESSION_FILE.exists():
+            if _poll_count % 120 == 0 and active_session_file.exists():
                 try:
-                    sd = json.loads(ACTIVE_SESSION_FILE.read_text(encoding='utf-8'))
+                    sd = json.loads(active_session_file.read_text(encoding='utf-8'))
                     sd['ts_start'] = ts_ms()
-                    ACTIVE_SESSION_FILE.write_text(json.dumps(sd), encoding='utf-8')
+                    active_session_file.write_text(json.dumps(sd), encoding='utf-8')
                 except Exception:
                     pass
             time.sleep(0.5)
@@ -448,6 +556,10 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     finally:
         try:
             prompt_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            stop_signal_file.unlink(missing_ok=True)
         except Exception:
             pass
         try:
@@ -502,21 +614,52 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         ts_fail = ts_ms()
         tl({'ts': ts_fail, 'event': 'failure_detected', 'exit_code': exit_code,
             'output_preview': output[:100].replace('\n', ' ')})
-        # Don't send error message if we stopped intentionally
-        if exit_code == 124:  # Timeout exit code
+        # Detect LLM gateway down (Anthropic API unavailable/overloaded) — stop silently
+        _llm_down_patterns = (
+            'overloaded', 'overloaded_error',
+            'api is unavailable', 'api unavailable',
+            'could not connect', 'connection refused',
+            'network error', 'rate_limit_error', 'rate limit',
+            '529', 'service unavailable', '503 service',
+        )
+        _out_lower = output.lower()
+        if any(p in _out_lower for p in _llm_down_patterns):
+            tl({'ts': ts_fail, 'event': 'llm_gateway_down', 'output_preview': output[:100].replace('\n', ' ')})
+            log('llm gateway down — suppressing Discord notification')
+            output = 'SENT'
+        # Max duration exceeded — notify user
+        elif _timed_out:
+            limit_label = f'{MAX_AGENT_SECONDS}s' if MAX_AGENT_SECONDS < 120 else f'{MAX_AGENT_SECONDS // 60}min'
+            tl({'ts': ts_fail, 'event': 'timeout_detected', 'limit_seconds': MAX_AGENT_SECONDS})
+            discord_send(channel, target,
+                         f'Router timed out ({limit_label} limit). Please send your request again.\n-# sent by delegate')
+            ts_notify = ts_ms()
+            tl({'ts': ts_notify, 'event': 'failure_notified', 'notify_exit': 0})
+            log(f'failure_notified at {ts_notify}')
+            output = 'SENT'
+        # Legacy exit code 124 timeout (from agent-smart)
+        elif exit_code == 124:
             tl({'ts': ts_fail, 'event': 'timeout_detected', 'limit_seconds': 1200})
             discord_send(channel, target,
                          'Session timed out (20min limit). Please send your request again.\n-# sent by delegate')
+            ts_notify = ts_ms()
+            tl({'ts': ts_notify, 'event': 'failure_notified', 'notify_exit': 0})
+            log(f'failure_notified at {ts_notify}')
+            output = 'SENT'
         elif not (exit_code == -15 or exit_code == 143):  # SIGTERM exit codes
             discord_send(channel, target,
                          f'Delegation failed (exit {exit_code}). Please try again.\n-# sent by delegate')
+            ts_notify = ts_ms()
+            tl({'ts': ts_notify, 'event': 'failure_notified', 'notify_exit': 0})
+            log(f'failure_notified at {ts_notify}')
+            output = 'SENT'
         else:
             discord_send(channel, target,
                          'Execution stopped.\n-# sent by delegate')
-        ts_notify = ts_ms()
-        tl({'ts': ts_notify, 'event': 'failure_notified', 'notify_exit': 0})
-        log(f'failure_notified at {ts_notify}')
-        output = 'SENT'
+            ts_notify = ts_ms()
+            tl({'ts': ts_notify, 'event': 'failure_notified', 'notify_exit': 0})
+            log(f'failure_notified at {ts_notify}')
+            output = 'SENT'
 
     # --- Log: delegate_exit ---
     ts_exit = ts_ms()
