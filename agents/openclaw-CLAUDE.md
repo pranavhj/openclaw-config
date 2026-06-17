@@ -138,16 +138,29 @@ You are the expert on the openclaw system. When diagnosing issues, read the live
 | Discord bot | `D:\MyData\Software\openclaw-config\bin\discord-bot.py` |
 | Discord sender | `D:\MyData\Software\openclaw-config\bin\discord-send.py` |
 | Delegate script | `D:\MyData\Software\openclaw-config\bin\delegate.py` |
-| Delegate logs | `%LOCALAPPDATA%\openclaw\delegate-YYYY-MM-DD.log` |
-| Timeline logs | `%LOCALAPPDATA%\openclaw\timeline-YYYY-MM-DD.log` |
+| Delegate logs | `%LOCALAPPDATA%\openclaw\delegate-{slug}-YYYY-MM-DD.log` |
+| Timeline logs | `%LOCALAPPDATA%\openclaw\timeline-{slug}-YYYY-MM-DD.log` |
+| Discord timeline | `%LOCALAPPDATA%\openclaw\discord-timeline-YYYY-MM-DD.log` |
+| Message tracer | `D:\MyData\Software\openclaw-config\bin\trace-message.py` |
+| Nightly audit | `D:\MyData\Software\openclaw-config\bin\nightly-audit.py` |
 | Issue tracker + source control | `D:\MyData\Software\openclaw-config\` → github.com/pranavhj/openclaw-config |
+
+### Troubleshooting message routing
+
+Use the trace tool to see the full data flow of any message:
+```
+python D:\MyData\Software\openclaw-config\bin\trace-message.py --last 3
+python D:\MyData\Software\openclaw-config\bin\trace-message.py "deploy dairy"
+python D:\MyData\Software\openclaw-config\bin\trace-message.py "22:48" --date 2026-06-16
+```
 
 ### Known failure patterns
 
 - **discord-send HTTP error** → check bot token in `C:\Users\prana\.openclaw\openclaw.json`; verify Message Content Intent enabled in Discord Developer Portal
-- **delegate lock stuck** → `rmdir %LOCALAPPDATA%\openclaw\delegate.lock` to clear manually
+- **delegate lock stuck** → `rmdir %LOCALAPPDATA%\openclaw\delegate-{slug}.lock` to clear manually
 - **discord-bot.py not receiving messages** → `nssm status discord-bot`; verify Message Content Intent enabled
 - **Empty message content** → Message Content Intent not enabled in Discord Developer Portal
+- **Wrong project context** → run `trace-message.py --last 5` to see slug matching decisions and continuity reuse
 
 For openclaw system changes (git commits, gh CLI, source control workflow), read `D:\MyData\Software\openclaw-config\agents\ops.md`.
 
@@ -163,7 +176,9 @@ You are running inside a project directory. Your job is to do the work here — 
 1. If `PROGRESS.md` exists, skim it for current state
 2. Do the work (create/edit files in this directory)
 3. Update `PROGRESS.md` to reflect latest state
-4. Send response to Discord (see parent CLAUDE.md for send command and format)
+4. Send response via discord-send.py — do NOT output as stdout:
+   `python D:\MyData\Software\openclaw-config\bin\discord-send.py --target $DISCORD_TARGET --message "<text>"`
+   End every message with `-# sent by claude` watermark.
 5. Output: SENT
 
 PROGRESS.md is a SHORT state bookmark (~10-20 lines):

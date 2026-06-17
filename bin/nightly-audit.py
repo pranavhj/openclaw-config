@@ -254,6 +254,201 @@ def load_jsonl(path):
     return events
 
 
+def parse_discord_timeline(events):
+    """Parse discord-timeline log for Q&A fast path events, slug routing, and bot restarts."""
+    qa_attempts = []  # Each: {ts, content_preview, response_len, elapsed_ms, msg_num}
+    slug_routes = []  # Each: {ts, slug, content_preview}
+    bot_restarts = 0
+
+    current_qa = None
+    for e in events:
+        evt = e.get('event', '')
+
+        if evt == 'bot_ready':
+            bot_restarts += 1
+
+        elif evt in ('qa_fast_path_attempt', 'qa_triage_attempt'):
+            current_qa = {
+                'ts': e.get('ts', ''),
+                'content_preview': e.get('content_preview', ''),
+                'msg_len': e.get('msg_len', 0),
+            }
+
+        elif evt in ('qa_fast_path_done', 'qa_triage_done') and current_qa:
+            current_qa['response_len'] = e.get('response_len', 0)
+            current_qa['elapsed_ms'] = e.get('elapsed_ms', 0)
+            current_qa['decision'] = e.get('decision', 'answer')
+            qa_attempts.append(current_qa)
+            current_qa = None
+
+        elif evt == 'message_received':
+            # Track msg_num for follow-up detection
+            if current_qa is None:
+                pass  # will be picked up by next qa_fast_path_attempt or delegate_spawn
+
+        elif evt == 'delegate_spawn':
+            slug_routes.append({
+                'ts': e.get('ts', ''),
+                'slug': e.get('slug', ''),
+                'content_preview': '',  # filled from surrounding message_received
+            })
+
+    # Backfill content_preview for slug_routes from message_received events
+    msg_events = [e for e in events if e.get('event') == 'message_received']
+    for route in slug_routes:
+        # Find the closest message_received before this delegate_spawn
+        best = None
+        for me in msg_events:
+            if me.get('ts', '') <= route['ts']:
+                best = me
+        if best:
+            route['content_preview'] = best.get('content_preview', '')
+            route['msg_num'] = best.get('num', 1)
+
+    # Backfill msg_num for qa_attempts from message_received events
+    for qa in qa_attempts:
+        best = None
+        for me in msg_events:
+            if me.get('ts', '') <= qa['ts']:
+                best = me
+        if best:
+            qa['msg_num'] = best.get('num', 1)
+
+    return {
+        'qa_attempts': qa_attempts,
+        'slug_routes': slug_routes,
+        'bot_restarts': bot_restarts,
+    }
+
+
+def check_qa_misfires(discord_data, known_project_names=None):
+    """Detect Q&A fast path misfires: follow-ups intercepted, project-related questions answered by Q&A."""
+    issues = []
+
+    for qa in discord_data['qa_attempts']:
+        preview = qa.get('content_preview', '').lower()
+        msg_num = qa.get('msg_num', 1)
+
+        # Follow-up detection: msg_num > 1 means it's not the first message in a session
+        followup_words = {'above', 'again', 'retry', 'previous', 'before', 'earlier', 'last',
+                          'same', 'that', 'those', 'redo', 'repeat'}
+        words = set(re.findall(r'\b\w+\b', preview))
+        has_followup = bool(words & followup_words)
+
+        if msg_num > 1 or has_followup:
+            issues.append({
+                'type': 'qa_followup_intercepted',
+                'severity': 'high',
+                'ts': qa.get('ts', ''),
+                'detail': f'Q&A intercepted follow-up (msg #{msg_num}): "{qa.get("content_preview", "")[:60]}"',
+            })
+
+        # Project name in Q&A question
+        if known_project_names:
+            for name in known_project_names:
+                if name in preview or (len(name) >= 4 and any(
+                    w.startswith(name[:4]) for w in words
+                )):
+                    issues.append({
+                        'type': 'qa_project_intercepted',
+                        'severity': 'medium',
+                        'ts': qa.get('ts', ''),
+                        'detail': f'Q&A answered project-related question ({name}): "{qa.get("content_preview", "")[:60]}"',
+                    })
+                    break
+
+    return issues
+
+
+def check_slug_misroutes(discord_data, known_project_names=None):
+    """Detect messages that went to router but mention a specific project."""
+    issues = []
+    if not known_project_names:
+        return issues
+
+    for route in discord_data['slug_routes']:
+        if route['slug'] == 'router':
+            preview = route.get('content_preview', '').lower()
+            words = set(re.findall(r'\b\w+\b', preview))
+            for name in known_project_names:
+                # Check exact match or close spelling
+                if name in words:
+                    issues.append({
+                        'type': 'slug_misroute',
+                        'severity': 'medium',
+                        'ts': route.get('ts', ''),
+                        'detail': f'Message mentions "{name}" but routed to router: "{route.get("content_preview", "")[:60]}"',
+                    })
+                    break
+                # Check prefix match (min 4 chars) — same logic as bot
+                for w in words:
+                    if len(w) >= 4 and name.startswith(w) and name != w:
+                        issues.append({
+                            'type': 'slug_misroute',
+                            'severity': 'low',
+                            'ts': route.get('ts', ''),
+                            'detail': f'Message has prefix "{w}" for project "{name}" but routed to router: "{route.get("content_preview", "")[:60]}"',
+                        })
+                        break
+
+    return issues
+
+
+def parse_all_slug_timelines(date_str):
+    """Read all timeline-{slug}-{date}.log files. Returns per-slug stats and cross-slug issues."""
+    import glob as _glob
+    pattern = str(LOG_DIR / f'timeline-*-{date_str}.log')
+    files = _glob.glob(pattern)
+
+    slug_stats = {}  # slug → {interactions, timeouts, slow_warnings, max_duration_ms, failures}
+    timeout_issues = []
+
+    for fpath in files:
+        fname = Path(fpath).name
+        # Extract slug from timeline-{slug}-{date}.log
+        prefix = 'timeline-'
+        suffix = f'-{date_str}.log'
+        if not fname.startswith(prefix) or not fname.endswith(suffix):
+            continue
+        slug = fname[len(prefix):-len(suffix)]
+
+        events = load_jsonl(Path(fpath))
+        stats = {
+            'interactions': 0,
+            'timeouts': 0,
+            'slow_warnings': 0,
+            'failures': 0,
+            'max_duration_ms': 0,
+        }
+
+        for e in events:
+            evt = e.get('event', '')
+            if evt == 'delegate_recv':
+                stats['interactions'] += 1
+            elif evt == 'max_duration_exceeded':
+                stats['timeouts'] += 1
+                elapsed = e.get('elapsed_s', 0)
+                timeout_issues.append({
+                    'type': 'timeout_killed',
+                    'severity': 'high',
+                    'slug': slug,
+                    'ts': e.get('ts', ''),
+                    'detail': f'{slug} killed after {elapsed}s (limit {e.get("limit_s", "?")}s)',
+                })
+            elif evt == 'slow_warning':
+                stats['slow_warnings'] += 1
+            elif evt == 'failure_detected':
+                stats['failures'] += 1
+            elif evt == 'delegate_exit':
+                ms = e.get('total_ms', 0)
+                if ms > stats['max_duration_ms']:
+                    stats['max_duration_ms'] = ms
+
+        slug_stats[slug] = stats
+
+    return slug_stats, timeout_issues
+
+
 def parse_router_interactions(events):
     """Group router timeline events into one record per delegate_recv→delegate_exit pair."""
     interactions = []
@@ -308,7 +503,7 @@ def parse_router_interactions(events):
             elif evt == 'stale_lock_broken':
                 current['issues'].append(('stale_lock', 'medium', 'previous run crashed without cleanup'))
             elif evt == 'stdout_forward':
-                current['issues'].append(('stdout_forward', 'medium', 'Claude printed to stdout instead of discord-send'))
+                current['issues'].append(('stdout_forward', 'low', 'Claude printed to stdout — forwarded by delegate'))
 
     if current:
         current['issues'].append(('no_exit', 'high', 'no delegate_exit seen'))
@@ -336,10 +531,11 @@ def check_interaction(interaction):
         interaction['issues'].append(('no_reply', 'high', 'no SENT in final output'))
 
     if total_ms is not None:
-        if total_ms >= 110000:
-            interaction['issues'].append(('near_timeout', 'high', f'{total_ms // 1000}s (≥110s)'))
-        elif total_ms >= 60000:
-            interaction['issues'].append(('slow', 'medium', f'{total_ms // 1000}s (≥60s)'))
+        # MAX_AGENT_SECONDS is 1200 (20min); near_timeout = 90% of that
+        if total_ms >= 1080000:
+            interaction['issues'].append(('near_timeout', 'high', f'{total_ms // 1000}s (≥18min)'))
+        elif total_ms >= 300000:
+            interaction['issues'].append(('slow', 'medium', f'{total_ms // 1000}s (≥5min)'))
 
     if 0 < interaction['prompt_bytes'] < 800:
         interaction['issues'].append(('tiny_prompt', 'low', f'{interaction["prompt_bytes"]}B prompt'))
@@ -379,24 +575,45 @@ def parse_gateway_stats(events):
     }
 
 
-def format_report(date_str, interactions, gateway_stats):
+def format_report(date_str, interactions, gateway_stats,
+                   discord_data=None, slug_stats=None, extra_issues=None):
     total = len(interactions)
     all_issues = [issue for i in interactions for issue in i['issues']]
     high = [x for x in all_issues if x[1] == 'high']
     medium = [x for x in all_issues if x[1] == 'medium']
     low = [x for x in all_issues if x[1] == 'low']
 
+    # Count extra issues from discord/slug analysis
+    extra_issues = extra_issues or []
+    extra_high = [x for x in extra_issues if x['severity'] == 'high']
+    extra_medium = [x for x in extra_issues if x['severity'] == 'medium']
+    extra_low = [x for x in extra_issues if x['severity'] == 'low']
+
+    total_high = len(high) + len(extra_high)
+    total_medium = len(medium) + len(extra_medium)
+    total_low = len(low) + len(extra_low)
+
     failed = sum(1 for i in interactions
                  if any(x[0] in ('exit_nonzero', 'no_reply', 'failure_detected') for x in i['issues']))
-    slow = sum(1 for i in interactions if i['total_ms'] and i['total_ms'] >= 60000)
+    slow = sum(1 for i in interactions if i['total_ms'] and i['total_ms'] >= 300000)
 
-    status = '✅' if not high else ('⚠️' if len(high) <= 2 else '🔴')
+    status = '✅' if not total_high else ('⚠️' if total_high <= 2 else '🔴')
 
     lines = [f"**Nightly Audit — {date_str}** {status}"]
     lines.append("")
 
-    # Discord interactions summary
-    if total > 0:
+    # Per-slug breakdown (from all timeline files)
+    if slug_stats:
+        slug_parts = []
+        for slug, stats in sorted(slug_stats.items()):
+            parts = [f"{stats['interactions']}"]
+            if stats['timeouts']:
+                parts.append(f"{stats['timeouts']} timed out")
+            if stats['failures']:
+                parts.append(f"{stats['failures']} failed")
+            slug_parts.append(f"{slug}: {', '.join(parts)}")
+        lines.append(f"Delegates: {', '.join(slug_parts)}")
+    elif total > 0:
         parts = [f"{total} total"]
         if failed:
             parts.append(f"{failed} failed")
@@ -405,6 +622,16 @@ def format_report(date_str, interactions, gateway_stats):
         lines.append(f"Discord: {', '.join(parts)}")
     else:
         lines.append("Discord: no interactions")
+
+    # Q&A fast path stats
+    if discord_data and discord_data['qa_attempts']:
+        qa = discord_data['qa_attempts']
+        avg_ms = sum(q.get('elapsed_ms', 0) for q in qa) // len(qa) if qa else 0
+        lines.append(f"Q&A fast path: {len(qa)} handled, avg {avg_ms}ms")
+
+    # Bot restarts
+    if discord_data and discord_data.get('bot_restarts', 0) > 1:
+        lines.append(f"Bot restarts: {discord_data['bot_restarts']}")
 
     # Gateway summary
     if gateway_stats['ask_requests'] > 0:
@@ -418,9 +645,10 @@ def format_report(date_str, interactions, gateway_stats):
         lines.append(f"Gateway /data: {gateway_stats['data_posts']} posts")
 
     # Issues
-    if all_issues:
+    all_issue_count = total_high + total_medium + total_low
+    if all_issue_count:
         lines.append("")
-        lines.append(f"Issues: {len(high)} high / {len(medium)} medium / {len(low)} low")
+        lines.append(f"Issues: {total_high} high / {total_medium} medium / {total_low} low")
         for i in interactions:
             if not i['issues']:
                 continue
@@ -428,6 +656,8 @@ def format_report(date_str, interactions, gateway_stats):
             preview = (i['msg_preview'] or '')[:50]
             tags = ', '.join(f"{x[0]}" for x in i['issues'])
             lines.append(f"- [{project}] \"{preview}\" → {tags}")
+        for ei in extra_issues:
+            lines.append(f"- [{ei.get('type', '?')}] {ei.get('detail', '')[:80]}")
     else:
         lines.append("")
         lines.append("No issues found.")
@@ -460,14 +690,16 @@ def call_gateway(token, message):
         return None
 
 
-def phase2_quality_score(token, interactions, date_str):
-    """Call gateway to quality-score flagged high-severity interactions."""
+def phase2_quality_score(token, interactions, date_str, extra_issues=None):
+    """Call gateway to quality-score flagged high-severity interactions + extra issues."""
     flagged = [
         i for i in interactions
         if any(x[1] == 'high' for x in i['issues'])
         and not any(x[0] == 'user_stopped' for x in i['issues'])
     ]
-    if not flagged:
+    extra_high = [x for x in (extra_issues or []) if x['severity'] == 'high']
+
+    if not flagged and not extra_high:
         return None
 
     lines = [
@@ -482,45 +714,89 @@ def phase2_quality_score(token, interactions, date_str):
         issues = ', '.join(x[0] for x in i['issues'])
         lines.append(f'- User: "{msg}" → [{project}], issues: {issues}')
 
+    if extra_high:
+        lines.append("")
+        lines.append("Additional issues from discord-timeline analysis:")
+        for ei in extra_high:
+            lines.append(f'- [{ei["type"]}] {ei["detail"][:100]}')
+
     lines.append("\nKeep your response under 5 bullet points. Be concrete.")
     return call_gateway(token, '\n'.join(lines))
 
 
-def phase3_optimization(token, interactions, gateway_stats, date_str):
+def phase3_optimization(token, interactions, gateway_stats, date_str,
+                         discord_data=None, slug_stats=None, extra_issues=None):
     """Call gateway for optimization suggestions based on observed patterns."""
     total = len(interactions)
-    if total == 0:
-        return None
+    extra_issues = extra_issues or []
 
-    high_count = sum(1 for i in interactions for x in i['issues'] if x[1] == 'high')
-    slow_count = sum(1 for i in interactions if i['total_ms'] and i['total_ms'] >= 60000)
+    high_count = (
+        sum(1 for i in interactions for x in i['issues'] if x[1] == 'high')
+        + sum(1 for x in extra_issues if x['severity'] == 'high')
+    )
+    slow_count = sum(1 for i in interactions if i['total_ms'] and i['total_ms'] >= 300000)
     failed_count = sum(
         1 for i in interactions
         if any(x[0] in ('exit_nonzero', 'no_reply', 'failure_detected') for x in i['issues'])
     )
+    timeout_count = sum(1 for x in extra_issues if x['type'] == 'timeout_killed')
+    qa_misfire_count = sum(1 for x in extra_issues if x['type'] in ('qa_followup_intercepted', 'qa_project_intercepted'))
+    misroute_count = sum(1 for x in extra_issues if x['type'] == 'slug_misroute')
 
-    if high_count == 0 and slow_count == 0:
+    if high_count == 0 and slow_count == 0 and not extra_issues:
         return None
 
-    issue_types = ', '.join(
+    issue_types = set(
         x[0] for i in interactions for x in i['issues']
-    ) or 'none'
+    ) | set(x['type'] for x in extra_issues)
 
     prompt = (
-        f"Openclaw router system audit — {date_str}\n"
-        f"System: Discord → delegate.py → Claude router → project sub-sessions\n\n"
+        f"Openclaw system audit — {date_str}\n"
+        f"System: Discord → discord-bot.py (slug matching + Q&A fast path) → delegate.py → Claude agent\n\n"
         f"Stats:\n"
-        f"- Total interactions: {total}\n"
+        f"- Router interactions: {total}\n"
         f"- High-severity issues: {high_count}\n"
         f"- Failed (no reply / nonzero exit): {failed_count}\n"
-        f"- Slow (>60s): {slow_count}\n"
+        f"- Slow (>5min): {slow_count}\n"
+        f"- Timed out (killed by MAX_AGENT_SECONDS): {timeout_count}\n"
+        f"- Q&A fast path misfires: {qa_misfire_count}\n"
+        f"- Slug misroutes (wrong project): {misroute_count}\n"
+    )
+
+    if slug_stats:
+        prompt += f"- Per-slug breakdown: {json.dumps(slug_stats)}\n"
+
+    if discord_data:
+        qa = discord_data.get('qa_attempts', [])
+        prompt += f"- Q&A fast path: {len(qa)} handled"
+        if discord_data.get('bot_restarts', 0) > 1:
+            prompt += f", bot restarted {discord_data['bot_restarts']} times"
+        prompt += "\n"
+
+    prompt += (
         f"- Gateway /ask: {gateway_stats['ask_requests']} requests, "
         f"{gateway_stats['ask_errors']} errors\n"
-        f"- Issue types seen: {issue_types}\n\n"
-        f"Suggest 2-3 concrete, actionable improvements to reduce failures or slow responses. "
+        f"- Issue types seen: {', '.join(sorted(issue_types)) or 'none'}\n\n"
+    )
+
+    if extra_issues:
+        prompt += "Specific issues found:\n"
+        for ei in extra_issues[:10]:  # Cap at 10 to avoid prompt bloat
+            prompt += f"- [{ei['type']}] {ei['detail'][:120]}\n"
+        prompt += "\n"
+
+    prompt += (
+        f"Suggest 2-3 concrete, actionable improvements to reduce failures, misfires, or misroutes. "
+        f"Focus on: slug matching aliases, Q&A fast path guards, timeout tuning. "
         f"Be specific. Under 5 bullet points."
     )
     return call_gateway(token, prompt)
+
+
+def _discover_project_names():
+    """Discover known project names using shared project_list module."""
+    from project_list import discover_projects
+    return set(discover_projects().keys())
 
 
 def main():
@@ -531,6 +807,7 @@ def main():
 
     date_str = target_date.strftime('%Y-%m-%d')
 
+    # ── Load all log sources ──
     router_log = LOG_DIR / f'timeline-router-{date_str}.log'
     router_events = load_jsonl(router_log)
 
@@ -542,24 +819,44 @@ def main():
     gateway_events = load_jsonl(gateway_log)
     gateway_stats = parse_gateway_stats(gateway_events)
 
-    if not router_events and not gateway_events:
+    # NEW: Discord timeline (Q&A fast path, slug routing, bot restarts)
+    discord_log = LOG_DIR / f'discord-timeline-{date_str}.log'
+    discord_events = load_jsonl(discord_log)
+    discord_data = parse_discord_timeline(discord_events)
+
+    # NEW: All per-slug timelines (timeouts, per-project stats)
+    slug_stats, timeout_issues = parse_all_slug_timelines(date_str)
+
+    # NEW: Detect Q&A misfires and slug misroutes
+    known_projects = _discover_project_names()
+    qa_issues = check_qa_misfires(discord_data, known_projects)
+    misroute_issues = check_slug_misroutes(discord_data, known_projects)
+    extra_issues = qa_issues + misroute_issues + timeout_issues
+
+    has_any_data = router_events or gateway_events or discord_events or slug_stats
+    if not has_any_data:
         send_discord(
             f"**Nightly Audit — {date_str}** ℹ️\n"
             f"No log files found for this date.\n\n-# sent by claude"
         )
         return
 
-    report = format_report(date_str, interactions, gateway_stats)
+    report = format_report(date_str, interactions, gateway_stats,
+                           discord_data=discord_data, slug_stats=slug_stats,
+                           extra_issues=extra_issues)
     send_discord(report)
 
     # Phase 2 + 3: AI-assisted analysis via LLM gateway (best-effort)
     token = load_gateway_token()
     if token:
-        quality = phase2_quality_score(token, interactions, date_str)
+        quality = phase2_quality_score(token, interactions, date_str, extra_issues=extra_issues)
         if quality:
             send_discord(f"**Quality Assessment**\n{quality}\n\n-# sent by claude")
 
-        suggestions = phase3_optimization(token, interactions, gateway_stats, date_str)
+        suggestions = phase3_optimization(
+            token, interactions, gateway_stats, date_str,
+            discord_data=discord_data, slug_stats=slug_stats, extra_issues=extra_issues,
+        )
         if suggestions:
             send_discord(f"**Optimization Suggestions**\n{suggestions}\n\n-# sent by claude")
 

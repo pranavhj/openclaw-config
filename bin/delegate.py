@@ -168,7 +168,7 @@ def main():
     message = ' '.join(remaining)
     t0 = time.monotonic()
 
-    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    today = datetime.now().strftime('%Y-%m-%d')  # local time for file date
     LOGDIR.mkdir(parents=True, exist_ok=True)
     log_file = LOGDIR / f'delegate-{slug}-{today}.log'
     tl_log   = LOGDIR / f'timeline-{slug}-{today}.log'
@@ -401,27 +401,31 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     tl({'ts': ts_ms(), 'event': 'project_match', 'project': slug,
         'work_dir': str(WORK_DIR).replace('\\', '/'), 'slug': slug})
 
-    # --- Recent message history (read ALL per-slug timeline files for unified context) ---
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d')
+    # --- Recent message history ---
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')  # local time
 
     log_lines = []
     today_count = 0
-    # Glob all timeline files for today (all slugs)
-    for tl_path in sorted(LOGDIR.glob(f'timeline-*-{today}.log')):
+    # Load this slug's own timeline for context (not the router's).
+    # This prevents cross-project context pollution (e.g. stockbroker seeing
+    # router messages about Gemini links or shaadibot).
+    slug_tl = LOGDIR / f'timeline-{slug}-{today}.log'
+    if slug_tl.exists():
         try:
-            lines = tl_path.read_text(encoding='utf-8', errors='replace').splitlines()
-            today_count += sum(
+            lines = slug_tl.read_text(encoding='utf-8', errors='replace').splitlines()
+            today_count = sum(
                 1 for l in lines
                 if '"event":"delegate_recv"' in l or '"event": "delegate_recv"' in l
             )
-            log_lines.extend(lines)
+            log_lines = lines
         except Exception:
             pass
-    # If not enough context today, also load yesterday's files
+    # If not enough context today, also load yesterday's slug timeline
     if today_count < 3:
-        for tl_path in sorted(LOGDIR.glob(f'timeline-*-{yesterday}.log')):
+        prev_tl = LOGDIR / f'timeline-{slug}-{yesterday}.log'
+        if prev_tl.exists():
             try:
-                prev = tl_path.read_text(encoding='utf-8', errors='replace').splitlines()
+                prev = prev_tl.read_text(encoding='utf-8', errors='replace').splitlines()
                 log_lines = prev + log_lines
             except Exception:
                 pass
@@ -475,18 +479,16 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     except Exception:
         pass
 
-    # Router gets a short hard timeout (2 min) — it should only answer+route, not do work.
-    # Sub-sessions spawned by the router run independently and have their own timeouts.
-    MAX_AGENT_SECONDS = 120 if slug in ('router', 'default') else 1800
+    # All slugs get 20-minute timeout. Router sometimes does real work (spawning sub-sessions).
+    MAX_AGENT_SECONDS = 1200
     was_stopped = False
     _timed_out = False
     _warned_slow = False
     try:
-        # Router (slug='router' or 'default') is stateless — no --continue.
-        # Sub-sessions spawned by router use --continue in their own CWDs.
+        # All delegate invocations are stateless (no --continue) because they all
+        # run in WORK_DIR (the router dir). Sub-sessions spawned by the router
+        # use --continue in their own project CWDs for conversation continuity.
         agent_cmd = [sys.executable, str(AGENT_SMART_PY)]
-        if slug not in ('router', 'default'):
-            agent_cmd.append('--continue')
         agent_cmd.extend(['--permission-mode', 'bypassPermissions',
                           '--model', 'sonnet', '--print-file', str(prompt_file)])
         proc = subprocess.Popen(
@@ -625,7 +627,11 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         _out_lower = output.lower()
         if any(p in _out_lower for p in _llm_down_patterns):
             tl({'ts': ts_fail, 'event': 'llm_gateway_down', 'output_preview': output[:100].replace('\n', ' ')})
-            log('llm gateway down — suppressing Discord notification')
+            log('llm gateway down — notifying user')
+            discord_send(channel, target,
+                         'Claude API is overloaded right now. Please try again in a few minutes.\n-# sent by delegate')
+            ts_notify = ts_ms()
+            tl({'ts': ts_notify, 'event': 'failure_notified', 'notify_exit': 0})
             output = 'SENT'
         # Max duration exceeded — notify user
         elif _timed_out:
@@ -645,6 +651,16 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
             ts_notify = ts_ms()
             tl({'ts': ts_notify, 'event': 'failure_notified', 'notify_exit': 0})
             log(f'failure_notified at {ts_notify}')
+            output = 'SENT'
+        elif any(p in _out_lower for p in ('hit your limit', "you've hit", 'you\u2019ve hit', 'usage limit exceeded')):
+            # Rate limit — extract original message (may include reset time) and forward it
+            rate_lines = [l.strip() for l in output.splitlines()
+                          if any(p in l.lower() for p in ('hit your limit', 'resets', "you've hit"))]
+            rate_msg = ' '.join(rate_lines[:3]).strip() if rate_lines else 'You\u2019ve hit your Claude usage limit. Please try again when it resets.'
+            discord_send(channel, target, f'{rate_msg}\n-# sent by delegate')
+            ts_notify = ts_ms()
+            tl({'ts': ts_notify, 'event': 'failure_notified', 'notify_exit': 0})
+            log(f'failure_notified (rate_limit) at {ts_notify}')
             output = 'SENT'
         elif not (exit_code == -15 or exit_code == 143):  # SIGTERM exit codes
             discord_send(channel, target,
