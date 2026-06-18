@@ -484,14 +484,14 @@ def parse_router_interactions(events):
             elif evt == 'agent_done':
                 current['exit_code'] = e.get('exit_code')
             elif evt == 'delegate_reply':
-                reply = e.get('reply_preview', '')
-                # Only count as replied if output actually contains SENT
                 current['has_reply'] = True
             elif evt == 'delegate_exit':
                 current['total_ms'] = e.get('total_ms')
                 final = str(e.get('final_output', ''))
-                if 'SENT' not in final:
-                    current['has_reply'] = False
+                # SENT in final_output also counts as replied
+                # (delegate_reply is skipped for trivial "SENT"-only outputs)
+                if 'SENT' in final:
+                    current['has_reply'] = True
                 interactions.append(current)
                 current = None
             elif evt == 'failure_detected':
