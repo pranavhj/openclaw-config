@@ -38,3 +38,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-030](issues/OC-030-nightly-audit.md) | feature | fixed | Nightly audit: rule-based log health checks + daily Discord report + safe auto-fix cycle (Phase 4) | `feat(OC-030)` |
 | [OC-031](issues/OC-031-nightly-audit-followup.md) | bug | fixed | Nightly audit 6/16 followups: llm_gateway_down now notifies user, rate limit forwards reset time, stdout_forward severity lowered to low | `fix(OC-031)` |
 | [OC-032](issues/OC-032-audit-no-reply-false-positive.md) | bug | fixed | Nightly audit no_reply false positive: delegate_reply overridden by delegate_exit, SENT-only outputs skipped | `fix(OC-032)` |
+| [OC-033](issues/OC-033-triage-improvements.md) | feature | fixed | Triage improvements: remove unreliable 10-min timeouts, always use gateway, skip triage for attachments, switch to opus model | `feat(OC-033)` |

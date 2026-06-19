@@ -26,9 +26,12 @@ DISCORD_SEND_PY  = Path(__file__).parent / 'discord-send.py'
 DISCORD_TARGET   = '1482473282925101217'
 
 SUITES = [
-    ('Unit tests',        TESTS_DIR / 'test_delegate.py'),
-    ('Integration tests', TESTS_DIR / 'test_integration.py'),
-    ('Behavior tests',    TESTS_DIR / 'test_claude_behavior.py'),
+    ('Unit tests',            TESTS_DIR / 'test_delegate.py'),
+    ('Concurrency tests',     TESTS_DIR / 'test_per_project_concurrency.py'),
+    ('Gateway tests',         TESTS_DIR / 'test_gateway.py'),
+    ('Nightly audit tests',   TESTS_DIR / 'test_nightly_audit.py'),
+    ('Integration tests',     TESTS_DIR / 'test_integration.py'),
+    ('Behavior tests',        TESTS_DIR / 'test_claude_behavior.py'),
 ]
 
 

@@ -490,7 +490,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         # use --continue in their own project CWDs for conversation continuity.
         agent_cmd = [sys.executable, str(AGENT_SMART_PY)]
         agent_cmd.extend(['--permission-mode', 'bypassPermissions',
-                          '--model', 'sonnet', '--print-file', str(prompt_file)])
+                          '--model', 'opus', '--print-file', str(prompt_file)])
         proc = subprocess.Popen(
             agent_cmd,
             cwd=str(WORK_DIR),

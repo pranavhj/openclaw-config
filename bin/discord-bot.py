@@ -71,7 +71,7 @@ def _ts_iso() -> str:
 def _tl(event: dict):
     """Append a JSONL event to the discord timeline log."""
     try:
-        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        today = datetime.now().strftime('%Y-%m-%d')  # local time for file date
         tl_path = LOGDIR / f'discord-timeline-{today}.log'
         with open(tl_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(event) + '\n')
@@ -82,7 +82,7 @@ def _tl(event: dict):
 def _log_human(text: str):
     """Append a human-readable line to the discord log."""
     try:
-        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        today = datetime.now().strftime('%Y-%m-%d')  # local time for file date
         log_path = LOGDIR / f'discord-{today}.log'
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with open(log_path, 'a', encoding='utf-8') as f:
@@ -102,43 +102,42 @@ CLAUDE_PROJECTS_DIR = os.path.expanduser('~/.claude/projects')
 LOGDIR = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'openclaw'
 
 # ---------------------------------------------------------------------------
+# Log cleanup — delete log files older than 10 days on startup
+# ---------------------------------------------------------------------------
+LOG_RETENTION_DAYS = 10
+
+def _cleanup_old_logs():
+    """Delete log files older than LOG_RETENTION_DAYS."""
+    from datetime import timedelta
+    cutoff = datetime.now() - timedelta(days=LOG_RETENTION_DAYS)
+    cutoff_str = cutoff.strftime('%Y-%m-%d')
+    patterns = ['delegate-*-????-??-??.log', 'timeline-*-????-??-??.log',
+                'discord-timeline-????-??-??.log', 'discord-????-??-??.log',
+                'delegate-prompt-*.txt']
+    removed = 0
+    for pat in patterns:
+        for f in LOGDIR.glob(pat):
+            # Extract date from filename (last YYYY-MM-DD before .log/.txt)
+            m = re.search(r'(\d{4}-\d{2}-\d{2})', f.name)
+            if m and m.group(1) < cutoff_str:
+                try:
+                    f.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+    if removed:
+        print(f'[startup] cleaned up {removed} log files older than {LOG_RETENTION_DAYS} days')
+
+_cleanup_old_logs()
+
+# ---------------------------------------------------------------------------
 # Project discovery + slug matching (per-project concurrency)
 # ---------------------------------------------------------------------------
 
-FILTERED_ROOTS = [
-    Path.home() / 'projects',
-    Path.home() / 'AndroidStudioProjects',
-    Path.home() / 'PycharmProjects',
-    Path.home() / 'UnityProjects',
-]
-UNFILTERED_ROOTS = [
-    Path('D:/MyData/Software'),
-]
-EXCLUDE_NAMES: set = set()
+from project_list import discover_projects
 
 _known_projects: dict = {}  # lowercase_name -> full_path
 _projects_refreshed_at: float = 0.0
-
-
-def _discover_projects() -> dict:
-    """Return {lowercase_name: full_path} for known projects."""
-    projects = {}
-    for root in FILTERED_ROOTS:
-        if not root.exists():
-            continue
-        for d in sorted(root.iterdir()):
-            if not d.is_dir() or d.name in EXCLUDE_NAMES:
-                continue
-            if (d / '.claude').exists() or (d / 'PROGRESS.md').exists():
-                projects[d.name.lower()] = str(d)
-    for root in UNFILTERED_ROOTS:
-        if not root.exists():
-            continue
-        for d in sorted(root.iterdir()):
-            if not d.is_dir() or d.name in EXCLUDE_NAMES:
-                continue
-            projects[d.name.lower()] = str(d)
-    return projects
 
 
 def _refresh_projects():
@@ -146,8 +145,19 @@ def _refresh_projects():
     global _known_projects, _projects_refreshed_at
     now = time.monotonic()
     if now - _projects_refreshed_at > 60:
-        _known_projects = _discover_projects()
+        _known_projects = discover_projects()
         _projects_refreshed_at = now
+
+
+# Common words that should never trigger prefix matching against project names
+_PREFIX_BLOCKLIST = {'this', 'that', 'with', 'from', 'have', 'make', 'take', 'give',
+                     'come', 'some', 'what', 'when', 'where', 'which', 'will', 'were',
+                     'been', 'being', 'does', 'done', 'also', 'just', 'like', 'more',
+                     'need', 'want', 'know', 'look', 'find', 'here', 'there', 'then',
+                     'than', 'them', 'they', 'your', 'above', 'after', 'about', 'again',
+                     'only', 'still', 'should', 'would', 'could', 'going', 'thing',
+                     'every', 'write', 'check', 'start', 'stock', 'phase', 'change',
+                     'claude', 'tests', 'test', 'step', 'same', 'send', 'open', 'close'}
 
 
 def _match_project(message: str) -> str:
@@ -156,8 +166,12 @@ def _match_project(message: str) -> str:
     Matching strategy (in priority order):
     1. Exact whole-word match: message contains the full project name as a word
        e.g. "deploy shaadibot" matches "shaadibot"
-    2. Prefix match: a message word is a prefix of a project name (min 4 chars)
+    2. Fuzzy match: message words joined (no spaces/underscores) match project name
+       e.g. "cricket analyzer" matches "cricketanalyzer" or "cricket_analyzer"
+       e.g. "stock broker" matches "stockbroker"
+    3. Prefix match: a message word is a prefix of a project name (min 4 chars)
        e.g. "shaadi" matches "shaadibot", "flight" matches "flightchecker"
+       Blocked words (common English) are excluded from prefix matching.
     If exactly one project matches, return it. Otherwise return 'router'.
     """
     _refresh_projects()
@@ -170,10 +184,32 @@ def _match_project(message: str) -> str:
     if len(exact) > 1:
         return 'router'
 
-    # Pass 2: prefix match (word is a prefix of project name, min 4 chars)
+    # Pass 2: fuzzy — join adjacent words and match against normalized project names
+    # e.g. "cricket analyzer" -> "cricketanalyzer" matches "cricketanalyzer" or "cricket_analyzer"
+    msg_lower = message.lower()
+    msg_joined = re.sub(r'[^a-z0-9]', '', msg_lower)
+    fuzzy_matches = set()
+    for name in _known_projects:
+        normalized = name.replace('_', '').replace('-', '')
+        if len(normalized) >= 6 and normalized in msg_joined:
+            fuzzy_matches.add(name)
+    if len(fuzzy_matches) == 1:
+        return fuzzy_matches.pop()
+    if len(fuzzy_matches) > 1:
+        # Multiple matches — deduplicate by normalized name (same project, different dirs)
+        by_norm = {}
+        for name in fuzzy_matches:
+            norm = name.replace('_', '').replace('-', '')
+            by_norm.setdefault(norm, []).append(name)
+        if len(by_norm) == 1:
+            # All matches are the same logical project — pick the first
+            return sorted(fuzzy_matches)[0]
+        return 'router'
+
+    # Pass 3: prefix match (word is a prefix of project name, min 4 chars)
     prefix_matches = set()
     for word in words:
-        if len(word) < 4:
+        if len(word) < 4 or word in _PREFIX_BLOCKLIST:
             continue
         for name in _known_projects:
             if name.startswith(word) and name != word:
@@ -185,6 +221,13 @@ def _match_project(message: str) -> str:
 
 # Per-project delegate tracking: slug -> PID
 _running_delegates: dict = {}
+_last_delegate_done_mono: float = 0.0  # monotonic time of last delegate completion
+
+# Conversation continuity: channel_id -> (slug, monotonic_time)
+# When slug matching returns "router" but a delegate finished recently for this channel,
+# reuse the last slug (handles "On now", "Yes go ahead", "ok do it", etc.)
+_last_channel_slug: dict = {}  # channel_id -> (slug, mono_time)
+_CONTINUITY_WINDOW_S = 0  # Disabled — triage LLM handles context routing via recent messages
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -202,69 +245,164 @@ def _is_pid_alive(pid: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Q&A fast path — route simple general-knowledge questions through LLM gateway
-# (Haiku, ~10-15s) instead of the full Claude router (~40-60s).
+# Q&A triage — use LLM gateway (Haiku) to classify messages as ANSWER or DELEGATE.
+# Simple questions get answered directly (~10-15s). Everything else goes to the
+# full Claude router (~40-60s).
 # ---------------------------------------------------------------------------
 
-_QA_STARTERS = {'what', 'why', 'how', 'when', 'where', 'who', 'can', 'does', 'is', 'are',
-                'should', 'did', 'has', 'have', 'explain', 'tell'}
-_ACTION_STARTERS = {'fix', 'add', 'update', 'create', 'build', 'deploy', 'run', 'show',
-                    'start', 'stop', 'remove', 'delete', 'install', 'refactor', 'implement',
-                    'make', 'change', 'write', 'check', 'debug', 'test', 'push', 'pull',
-                    'resume', 'continue', 'revert', 'reset', 'send', 'open', 'close'}
-_GATEWAY_QA_URL = 'http://localhost:18789/ask'
-_GATEWAY_QA_PROJECT = 'qa'
+_GATEWAY_TRIAGE_URL = 'http://localhost:18789/ask'
+_GATEWAY_TRIAGE_PROJECT = 'triage'
 
 
-def _is_simple_question(text: str) -> bool:
-    """Return True if this is a general-knowledge question that can bypass the full router.
+# Recent message buffer for triage context (last N messages per channel)
+_recent_messages: dict = {}  # channel_id -> deque of (content, slug, timestamp)
+_RECENT_MSG_LIMIT = 5
 
-    Conservative: only matches when there's no known-project mention and no action verb.
+
+def _seed_recent_messages():
+    """Seed _recent_messages from today's discord timeline so triage has context after restart."""
+    today = datetime.now().strftime('%Y-%m-%d')
+    tl_path = LOGDIR / f'discord-timeline-{today}.log'
+    if not tl_path.exists():
+        return
+    try:
+        lines = tl_path.read_text(encoding='utf-8', errors='replace').splitlines()
+    except Exception:
+        return
+    # Collect message_received + delegate_spawn pairs to build (content, slug, ts)
+    pending = {}  # sid -> (content, channel_id, ts)
+    for line in lines:
+        try:
+            e = json.loads(line)
+            evt = e.get('event', '')
+            sid = e.get('sid', '')
+            if evt == 'message_received' and sid:
+                ch = str(e.get('channel_id', ''))
+                pending[sid] = (e.get('content_preview', '')[:100], ch, e.get('ts', ''))
+            elif evt == 'delegate_spawn' and sid and sid in pending:
+                content, ch, ts = pending[sid]
+                slug = e.get('slug', 'router')
+                _recent_messages.setdefault(ch, collections.deque(maxlen=_RECENT_MSG_LIMIT))
+                _recent_messages[ch].append((content, slug, ts))
+            elif evt == 'qa_triage_done' and sid and sid in pending:
+                content, ch, ts = pending[sid]
+                slug = e.get('triage_slug', 'qa')
+                decision = e.get('decision', '')
+                if decision == 'answer':
+                    slug = 'qa'
+                _recent_messages.setdefault(ch, collections.deque(maxlen=_RECENT_MSG_LIMIT))
+                _recent_messages[ch].append((content, slug, ts))
+        except Exception:
+            continue
+    total = sum(len(v) for v in _recent_messages.values())
+    if total:
+        print(f'[startup] seeded {total} recent messages from {tl_path.name}')
+
+_seed_recent_messages()
+
+
+def _build_triage_prompt(content: str, channel_id: str) -> list[tuple[int, str]]:
+    """Build triage prompt with numbered project list and recent messages.
+
+    Returns (project_index_map, prompt_text):
+      project_index_map: [(index, slug), ...] for resolving LLM response
     """
-    t = text.strip()
-    if not t or len(t) > 500:
-        return False
-    words_lower = re.findall(r'\b\w+\b', t.lower())
-    if not words_lower:
-        return False
-    first = words_lower[0]
-    # Reject if starts with an action verb
-    if first in _ACTION_STARTERS:
-        return False
-    # Reject if mentions a known project slug
     _refresh_projects()
-    if any(name in words_lower for name in _known_projects):
-        return False
-    # Accept if clearly a question
-    return t.endswith('?') or first in _QA_STARTERS
+    sorted_projects = sorted(_known_projects.keys())
+    # Build numbered list: 1=first project, 0=router (unsure)
+    project_lines = []
+    index_map: list[tuple[int, str]] = []
+    for i, name in enumerate(sorted_projects, start=1):
+        project_lines.append(f'{i}. {name}')
+        index_map.append((i, name))
+
+    projects_str = '\n'.join(project_lines)
+
+    recent_lines = []
+    recent = _recent_messages.get(channel_id, [])
+    for msg_text, msg_slug, msg_ts in recent:
+        slug_label = f' [{msg_slug}]' if msg_slug != 'router' else ''
+        recent_lines.append(f'- {msg_text[:100]}{slug_label}')
+    recent_str = '\n'.join(recent_lines) if recent_lines else '(none)'
+
+    prompt = f'[PROJECTS]\n{projects_str}\n\n[RECENT]\n{recent_str}\n\n[MESSAGE]\n{content}'
+    return index_map, prompt
 
 
-async def _gateway_ask(message: str) -> str | None:
-    """Call /ask with context=none. Returns response text or None on error."""
+async def _triage_message(content: str, channel_id: str) -> tuple[str, str | None, str]:
+    """Call triage gateway project.
+
+    Returns (decision, response_text, slug):
+      ('answer', response_text, '') — bot replies directly
+      ('delegate', None, slug)     — delegate to this slug (or 'router')
+    """
     import urllib.request
     import urllib.error
 
-    def _call() -> str | None:
+    index_map, prompt_text = _build_triage_prompt(content, channel_id)
+
+    def _call() -> tuple[str, str | None, str]:
         body = json.dumps({
-            'project': _GATEWAY_QA_PROJECT,
-            'message': message,
+            'project': _GATEWAY_TRIAGE_PROJECT,
+            'message': prompt_text,
             'context': 'none',
         }).encode('utf-8')
         req = urllib.request.Request(
-            _GATEWAY_QA_URL, data=body,
+            _GATEWAY_TRIAGE_URL, data=body,
             headers={'Authorization': f'Bearer {_gateway_token}',
                      'Content-Type': 'application/json'},
         )
         try:
             with urllib.request.urlopen(req, timeout=90) as resp:
                 data = json.loads(resp.read())
-                return data.get('response')
+                raw = (data.get('response') or '').strip()
+                log.info('triage raw response: %s', raw[:200])
+                if not raw:
+                    return ('delegate', None, 'router')
+                # Parse: first line is ANSWER or DELEGATE [slug]
+                first_line = raw.split('\n', 1)[0].strip()
+                first_upper = first_line.upper()
+                if first_upper.startswith('DELEGATE'):
+                    # Extract slug: "DELEGATE stockbroker" or "DELEGATE 3" -> slug
+                    parts = first_line.split(None, 1)
+                    raw_slug = parts[1].strip().lower() if len(parts) > 1 else 'router'
+                    slug = raw_slug
+                    # Resolve numbered response via index_map (0=router, 1..N=projects)
+                    if raw_slug.isdigit():
+                        num = int(raw_slug)
+                        if num == 0:
+                            slug = 'router'
+                        else:
+                            found = [s for i, s in index_map if i == num]
+                            slug = found[0] if found else 'router'
+                    # Validate slug against known projects
+                    elif slug not in _known_projects and slug != 'router':
+                        # Try prefix match
+                        matches = [n for n in _known_projects if n.startswith(slug)]
+                        if len(matches) == 1:
+                            slug = matches[0]
+                        else:
+                            # Try fuzzy: remove spaces/hyphens and match
+                            normalized = slug.replace(' ', '').replace('-', '')
+                            for name in _known_projects:
+                                if name.replace('-', '') == normalized:
+                                    slug = name
+                                    break
+                            else:
+                                slug = 'router'
+                    log.info('triage slug: raw=%s resolved=%s', raw_slug, slug)
+                    return ('delegate', None, slug)
+                if first_upper == 'ANSWER':
+                    answer = raw.split('\n', 1)[1].strip() if '\n' in raw else ''
+                    return ('answer', answer, '') if answer else ('delegate', None, 'router')
+                # Unrecognized format — delegate to be safe
+                return ('delegate', None, 'router')
         except urllib.error.HTTPError as e:
-            log.warning('gateway /ask HTTP %d for Q&A', e.code)
-            return None
+            log.warning('gateway triage HTTP %d', e.code)
+            return ('error', f'triage gateway HTTP {e.code}', 'router')
         except Exception as e:
-            log.warning('gateway /ask error: %s', e)
-            return None
+            log.warning('gateway triage error: %s', e)
+            return ('error', str(e)[:200], 'router')
 
     return await asyncio.to_thread(_call)
 
@@ -499,6 +637,12 @@ async def watch_claude_sessions():
                 await _edit_status(state['session_data'], state['status_events'], elapsed, done=True)
                 # Clean up running delegate tracker
                 _running_delegates.pop(slug, None)
+                global _last_delegate_done_mono
+                _last_delegate_done_mono = time.monotonic()
+                # Track last slug per channel for conversation continuity
+                ch = state['session_data'].get('target', '')
+                if ch and slug not in ('router', 'default'):
+                    _last_channel_slug[ch] = (slug, time.monotonic())
 
             # --- Scan JSONL files for new activity ---
             current_files = set(glob.glob(f'{CLAUDE_PROJECTS_DIR}/**/*.jsonl', recursive=True))
@@ -701,30 +845,54 @@ async def on_message(message):
              'total_bytes': sum(a.size for a in message.attachments)})
         _log_human(f'[{sid}] Downloaded {attach_count} attachments')
 
-    # --- Q&A fast path: simple questions bypass the full router ---
-    if _gateway_token and _is_simple_question(content):
-        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'qa_fast_path_attempt',
+    # --- Q&A triage: ask LLM whether to answer directly or delegate ---
+    # Always runs when gateway token is configured (no cooldown, no message-length limit).
+    # Skip triage when attachments are present — always delegate (triage can't see files).
+    triage_slug = ''
+    if _gateway_token and not attach_count:
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'qa_triage_attempt',
              'msg_len': len(content), 'content_preview': content[:100]})
-        _log_human(f'[{sid}] Q&A fast path: routing to gateway')
-        resp = await _gateway_ask(content)
-        if resp:
-            watermarked = resp.strip() + '\n-# sent by claude'
+        _log_human(f'[{sid}] Q&A triage: asking gateway')
+        ch_key = str(message.channel.id)
+        decision, resp, triage_slug = await _triage_message(content, ch_key)
+        if decision == 'answer' and resp:
+            watermarked = resp.strip()
+            # Add watermark if not already present
+            if not watermarked.endswith('-# sent by claude'):
+                watermarked += '\n-# sent by claude'
             try:
                 await message.reply(watermarked)
             except Exception as e:
-                log.warning('[%s] qa fast-path reply failed: %s', sid, e)
+                log.warning('[%s] qa triage reply failed: %s', sid, e)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
-            _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'qa_fast_path_done',
-                 'response_len': len(resp), 'elapsed_ms': elapsed_ms})
-            _log_human(f'[{sid}] Q&A fast path done: {elapsed_ms}ms, {len(resp)}ch')
+            _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'qa_triage_done',
+                 'decision': 'answer', 'response_len': len(resp), 'elapsed_ms': elapsed_ms})
+            _log_human(f'[{sid}] Q&A triage: ANSWER ({elapsed_ms}ms, {len(resp)}ch)')
+            # Record in recent messages
+            _recent_messages.setdefault(ch_key, collections.deque(maxlen=_RECENT_MSG_LIMIT))
+            _recent_messages[ch_key].append((content[:100], 'qa', _ts_iso()))
             return
-        # Gateway failed — fall through to normal delegate dispatch
-        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'qa_fast_path_fallback',
-             'reason': 'gateway returned no response'})
-        _log_human(f'[{sid}] Q&A fast path fallback: gateway failed, using router')
+        # Triage said DELEGATE or errored — use slug hint and fall through
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'qa_triage_done',
+             'decision': decision, 'triage_slug': triage_slug, 'elapsed_ms': elapsed_ms})
+        if decision == 'error':
+            _log_human(f'[{sid}] Q&A triage: ERROR {resp} ({elapsed_ms}ms) — falling back to keyword routing')
+        else:
+            _log_human(f'[{sid}] Q&A triage: DELEGATE slug={triage_slug} ({elapsed_ms}ms)')
+    elif attach_count:
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'qa_triage_skipped',
+             'reason': 'attachments', 'attachment_count': attach_count})
+        _log_human(f'[{sid}] Q&A triage: skipped (has {attach_count} attachments)')
 
     # --- Project slug matching + per-project concurrency ---
-    slug = _match_project(content)
+    # Priority: triage slug > keyword match (fallback) > router
+    if triage_slug and triage_slug != 'router' and triage_slug in _known_projects:
+        slug = triage_slug
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'slug_from_triage', 'slug': slug})
+        _log_human(f'[{sid}] Slug from triage: {slug}')
+    else:
+        slug = _match_project(content)
 
     # Check if this slug already has a running delegate
     if slug in _running_delegates:
@@ -763,6 +931,13 @@ async def on_message(message):
                 start_new_session=True,
             )
         _running_delegates[slug] = proc.pid
+        # Record slug for conversation continuity (even before it finishes)
+        if slug not in ('router', 'default'):
+            _last_channel_slug[str(message.channel.id)] = (slug, time.monotonic())
+        # Record in recent messages for triage context
+        ch_key = str(message.channel.id)
+        _recent_messages.setdefault(ch_key, collections.deque(maxlen=_RECENT_MSG_LIMIT))
+        _recent_messages[ch_key].append((content[:100], slug, _ts_iso()))
         duration_ms = int((time.monotonic() - t0) * 1000)
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'delegate_spawned',
              'slug': slug, 'pid': proc.pid, 'dispatch_ms': duration_ms})

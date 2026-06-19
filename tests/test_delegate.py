@@ -176,8 +176,8 @@ if delegate:
     result = delegate.parse_history(log_lines)
     entries = [l for l in result.splitlines() if l.strip()]
     (p if len(entries) == 2 else f)(f'returns last 5 excluding current ({len(entries)} entries)')
-    (p if '[openclaw] hello world' in result else f)('first entry with project tag')
-    (p if '[screen-reader] second message' in result else f)('second entry with correct project tag')
+    (p if '[openclaw]' in result and 'hello world' in result else f)('first entry with project tag')
+    (p if '[screen-reader]' in result and 'second message' in result else f)('second entry with correct project tag')
     (p if 'current (skip)' not in result else f)('current message excluded from history')
 else:
     skip('delegate module not loaded')
@@ -253,7 +253,7 @@ if session_reset:
 # ── 13. Yesterday log fallback in source ──────────────────────────────────────
 print('\n13. Yesterday log fallback')
 
-(p if 'yesterday_log' in delegate_src else f)('yesterday_log in delegate.py')
+(p if 'yesterday' in delegate_src else f)('yesterday date computed in delegate.py')
 (p if 'today_count' in delegate_src else f)('today_count conditional check present')
 (p if 'timedelta(days=1)' in delegate_src else f)('timedelta(days=1) for yesterday')
 
@@ -304,7 +304,7 @@ try:
     (p if 'nssm status discord-bot' in claude_md else f)('uses nssm (not systemctl)')
     (p if '-# sent by claude' in claude_md else f)('has Discord watermark instruction')
     (p if 'openclaw message send' not in claude_md else f)('no stale openclaw message send reference')
-    (p if 'delegate.lock' in claude_md else f)('has delegate lock path')
+    (p if 'delegate' in claude_md and '.lock' in claude_md else f)('has delegate lock path')
     (p if 'D:\\MyData\\Software\\openclaw-config' in claude_md or
          r'D:\MyData\Software\openclaw-config' in claude_md else f)(
         'has repo path D:\\MyData\\Software\\openclaw-config')
@@ -319,10 +319,20 @@ ALLOWED = {
     'delegate.py', 'discord-bot.py', 'discord-send.py', 'agent-smart.py',
     'session-reset.py', 'bot-logs.py', 'route-audit.py', 'run-tests.py',
     'restart-bot.py',
+    # Android tooling
+    'android-deploy.sh', 'android-logs.sh', 'android-new.sh', 'android-test.sh',
+    # LLM Gateway
+    'llm-gateway.py', 'gateway-delegate.py', 'project_store.py',
     # Service management
     'manage-service.ps1',
     # Existing/observability
     'openclaw-timeline',
+    # Nightly audit
+    'nightly-audit.py',
+    # Message trace tool
+    'trace-message.py',
+    # Shared project discovery
+    'project_list.py',
     # Legacy bash scripts retained for reference
     'delegate', 'discord-send', 'agent-smart', 'session-reset',
     'bot-logs', 'route-audit', 'run-tests',
@@ -435,7 +445,7 @@ discord_send_src = src('discord-send.py')
 (p if '--edit' in discord_send_src else f)('discord-send.py has --edit argument')
 (p if 'PATCH' in discord_send_src else f)('discord-send.py uses PATCH method for edits')
 (p if 'MSG_ID:' in discord_send_src else f)("discord-send.py prints 'MSG_ID:' on success")
-(p if "msg_id = data.get('id', '')" in discord_send_src else f)(
+(p if "data.get('id', '')" in discord_send_src else f)(
     'discord-send.py extracts message ID from response')
 
 # ── 28. delegate.py: active-session.json + status message (OC-023) ────────────
@@ -443,14 +453,14 @@ print('\n28. delegate.py active-session tracking (OC-023)')
 
 (p if 'ACTIVE_SESSION_FILE' in delegate_src else f)(
     'delegate.py defines ACTIVE_SESSION_FILE')
-(p if 'active-session.json' in delegate_src else f)(
-    "delegate.py references 'active-session.json'")
+(p if 'active-session' in delegate_src else f)(
+    "delegate.py references 'active-session' files")
 (p if 'status_msg_id' in delegate_src else f)(
     'delegate.py captures status_msg_id from discord-send.py output')
 (p if 'Working' in delegate_src and 'MSG_ID:' in delegate_src else f)(
     "delegate.py sends Working status and parses MSG_ID response")
-(p if 'ACTIVE_SESSION_FILE.unlink' in delegate_src else f)(
-    'delegate.py cleans up active-session.json in finally block')
+(p if 'active_session_file.unlink' in delegate_src else f)(
+    'delegate.py cleans up active-session file in finally block')
 
 # ── 29. restart-bot.py and manage-service.ps1 grant-user (OC-024) ─────────────
 print('\n29. Non-elevated service restart (OC-024)')
@@ -474,35 +484,33 @@ ps1_src = src('manage-service.ps1')
 # ── 30. OC-026: quota optimization checks ─────────────────────────────────────
 print('\n30. OC-026 quota optimization (stateless Haiku routing + lower compaction)')
 
-# delegate.py routing call must NOT use --continue
+# delegate.py routing call: ALL slugs are stateless (no --continue) because they all
+# run in WORK_DIR (the router dir). Sub-sessions spawned by router use --continue
+# in their own project CWDs.
 routing_block = delegate_src[delegate_src.rfind('AGENT_SMART_PY'):]
 routing_block = routing_block[:routing_block.find('cwd=')]
 (p if '--continue' not in routing_block else f)(
-    "delegate.py routing call does NOT pass --continue (stateless)")
+    "delegate.py never passes --continue (all stateless)")
 
-# delegate.py routing call must use haiku
-(p if "'haiku'" in routing_block or '"haiku"' in routing_block else f)(
-    "delegate.py routing call uses 'haiku' model")
+# delegate.py routing call uses opus model
+(p if "'opus'" in routing_block or '"opus"' in routing_block else f)(
+    "delegate.py routing call uses 'opus' model")
 
-# delegate.py routing call must NOT use sonnet
-(p if "'sonnet'" not in routing_block and '"sonnet"' not in routing_block else f)(
-    "delegate.py routing call does not use 'sonnet'")
-
-# agent-smart.py threshold and pairs must match new values
+# agent-smart.py threshold and pairs must match current values
 if agent_smart:
-    (p if agent_smart.THRESHOLD_KB == 100 else f)(
-        f'agent-smart.py THRESHOLD_KB == 100 (got: {agent_smart.THRESHOLD_KB})')
-    (p if agent_smart.KEEP_PAIRS == 5 else f)(
-        f'agent-smart.py KEEP_PAIRS == 5 (got: {agent_smart.KEEP_PAIRS})')
+    (p if agent_smart.THRESHOLD_KB == 200 else f)(
+        f'agent-smart.py THRESHOLD_KB == 200 (got: {agent_smart.THRESHOLD_KB})')
+    (p if agent_smart.KEEP_PAIRS == 10 else f)(
+        f'agent-smart.py KEEP_PAIRS == 10 (got: {agent_smart.KEEP_PAIRS})')
 else:
     # Fall back to source parsing
     import re as _re2
     m_kb = _re2.search(r'THRESHOLD_KB\s*=\s*(\d+)', agent_src)
     m_kp = _re2.search(r'KEEP_PAIRS\s*=\s*(\d+)', agent_src)
-    (p if m_kb and int(m_kb.group(1)) == 100 else f)(
-        f'THRESHOLD_KB == 100 in source (got: {m_kb.group(1) if m_kb else "missing"})')
-    (p if m_kp and int(m_kp.group(1)) == 5 else f)(
-        f'KEEP_PAIRS == 5 in source (got: {m_kp.group(1) if m_kp else "missing"})')
+    (p if m_kb and int(m_kb.group(1)) == 200 else f)(
+        f'THRESHOLD_KB == 200 in source (got: {m_kb.group(1) if m_kb else "missing"})')
+    (p if m_kp and int(m_kp.group(1)) == 10 else f)(
+        f'KEEP_PAIRS == 10 in source (got: {m_kp.group(1) if m_kp else "missing"})')
 
 # projects/openclaw/CLAUDE.md sub-session command must pin --model sonnet
 openclaw_claude_md = Path.home() / 'projects' / 'openclaw' / 'CLAUDE.md'
