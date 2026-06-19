@@ -22,6 +22,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 SCRIPT_DIR = Path(__file__).parent
+sys.path.insert(0, str(SCRIPT_DIR))
+from project_list import discover_projects
 AGENT_SMART_PY = SCRIPT_DIR / 'agent-smart.py'
 DISCORD_SEND_PY = SCRIPT_DIR / 'discord-send.py'
 SESSION_RESET_PY = SCRIPT_DIR / 'session-reset.py'
@@ -354,39 +356,9 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     if active_session_file is None:
         active_session_file = LOGDIR / f'active-session-{slug}.json'
 
-    # --- Discover projects ---
-    # Scan multiple roots; include full path so Claude can cd to the right dir.
-    # Filtered roots: only dirs with .claude (active session) or PROGRESS.md (tracked).
-    # Unfiltered roots: include all subdirs (user explicitly wants everything visible).
-    FILTERED_ROOTS = [
-        Path.home() / 'projects',
-        Path.home() / 'AndroidStudioProjects',
-        Path.home() / 'PycharmProjects',
-        Path.home() / 'UnityProjects',
-    ]
-    UNFILTERED_ROOTS = [
-        Path('D:/MyData/Software'),
-    ]
-    # Dirs to always exclude (infra/config repos, not user projects)
-    # Note: openclaw-config removed from exclusion — user works on this infra via Discord
-    EXCLUDE_NAMES: set = set()
-
-    projects = []  # list of (name, full_path)
-    for root in FILTERED_ROOTS:
-        if not root.exists():
-            continue
-        for d in sorted(root.iterdir()):
-            if not d.is_dir() or d.name in EXCLUDE_NAMES:
-                continue
-            if (d / '.claude').exists() or (d / 'PROGRESS.md').exists():
-                projects.append((d.name, str(d)))
-    for root in UNFILTERED_ROOTS:
-        if not root.exists():
-            continue
-        for d in sorted(root.iterdir()):
-            if not d.is_dir() or d.name in EXCLUDE_NAMES:
-                continue
-            projects.append((d.name, str(d)))
+    # --- Discover projects (via project_list.py — single source of truth) ---
+    _projects_dict = discover_projects()
+    projects = sorted(_projects_dict.items())  # [(name, full_path), ...]
     projects_str = '\n'.join(f'{name} ({path})' for name, path in projects) if projects else 'none'
 
     # --- Log: human-readable header ---
@@ -490,7 +462,7 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         # use --continue in their own project CWDs for conversation continuity.
         agent_cmd = [sys.executable, str(AGENT_SMART_PY)]
         agent_cmd.extend(['--permission-mode', 'bypassPermissions',
-                          '--model', 'opus', '--print-file', str(prompt_file)])
+                          '--model', 'sonnet', '--print-file', str(prompt_file)])
         proc = subprocess.Popen(
             agent_cmd,
             cwd=str(WORK_DIR),

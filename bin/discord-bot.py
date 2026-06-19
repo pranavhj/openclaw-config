@@ -95,7 +95,8 @@ with open(os.path.expanduser('~/.openclaw/openclaw.json')) as f:
     config = json.load(f)
 token = config['channels']['discord']['token']
 _gateway_token = config.get('gateway', {}).get('auth', {}).get('token', '')
-ALLOWED_USER = 1277144623231537274
+_allow_from = config.get('channels', {}).get('discord', {}).get('allowFrom', [])
+ALLOWED_USER = int(_allow_from[0]) if _allow_from else 1277144623231537274
 
 CLAUDE_PROJECTS_DIR = os.path.expanduser('~/.claude/projects')
 

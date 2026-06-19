@@ -39,3 +39,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-031](issues/OC-031-nightly-audit-followup.md) | bug | fixed | Nightly audit 6/16 followups: llm_gateway_down now notifies user, rate limit forwards reset time, stdout_forward severity lowered to low | `fix(OC-031)` |
 | [OC-032](issues/OC-032-audit-no-reply-false-positive.md) | bug | fixed | Nightly audit no_reply false positive: delegate_reply overridden by delegate_exit, SENT-only outputs skipped | `fix(OC-032)` |
 | [OC-033](issues/OC-033-triage-improvements.md) | feature | fixed | Triage improvements: remove unreliable 10-min timeouts, always use gateway, skip triage for attachments, switch to opus model | `feat(OC-033)` |
+| [OC-034](issues/OC-034-architecture-fixes.md) | bug | fixed | Architecture fixes: gateway log date UTC→local, ALLOWED_USER from config, consolidate project discovery, discord-send retry | `fix(OC-034)` |

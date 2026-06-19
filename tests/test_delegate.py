@@ -260,10 +260,12 @@ print('\n13. Yesterday log fallback')
 # ── 14. Project discovery filters to directories ─────────────────────────────
 print('\n14. Project discovery (dirs only)')
 
-(p if 'iterdir()' in delegate_src else f)('iterdir() used for project discovery')
-(p if 'is_dir()' in delegate_src else f)('is_dir() filter present (dirs only)')
-(p if 'UNFILTERED_ROOTS' in delegate_src else f)('UNFILTERED_ROOTS defined (D:/MyData/Software)')
-(p if 'EXCLUDE_NAMES' in delegate_src else f)('EXCLUDE_NAMES defined (openclaw-config excluded)')
+project_list_src = src('project_list.py')
+(p if 'iterdir()' in project_list_src else f)('iterdir() used for project discovery (project_list.py)')
+(p if 'is_dir()' in project_list_src else f)('is_dir() filter present (project_list.py)')
+(p if 'UNFILTERED_ROOTS' in project_list_src else f)('UNFILTERED_ROOTS defined in project_list.py')
+(p if 'EXCLUDE_NAMES' in project_list_src else f)('EXCLUDE_NAMES defined in project_list.py')
+(p if 'from project_list import discover_projects' in delegate_src else f)('delegate.py imports discover_projects from project_list')
 
 # ── 15. Prompt structure in source ────────────────────────────────────────────
 print('\n15. Prompt structure')

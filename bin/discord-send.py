@@ -11,6 +11,7 @@ import json
 import mimetypes
 import os
 import sys
+import time
 import urllib.request
 import urllib.error
 import uuid
@@ -120,22 +121,35 @@ def main():
         return _do_request(req)
 
     def _do_request(req):
-        """Execute HTTP request, return message ID or exit on error."""
-        try:
-            with urllib.request.urlopen(req) as resp:
-                resp_body = resp.read()
-                if resp.status == 200:
-                    data = json.loads(resp_body)
-                    return data.get('id', '')
-                else:
-                    print(f'discord-send: HTTP {resp.status}', file=sys.stderr)
-                    sys.exit(1)
-        except urllib.error.HTTPError as e:
-            print(f'discord-send: HTTP {e.code}', file=sys.stderr)
-            sys.exit(1)
-        except urllib.error.URLError as e:
-            print(f'discord-send: connection error: {e.reason}', file=sys.stderr)
-            sys.exit(1)
+        """Execute HTTP request, return message ID or exit on error. Retries on transient failures."""
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    resp_body = resp.read()
+                    if resp.status == 200:
+                        data = json.loads(resp_body)
+                        return data.get('id', '')
+                    else:
+                        print(f'discord-send: HTTP {resp.status}', file=sys.stderr)
+                        sys.exit(1)
+            except urllib.error.HTTPError as e:
+                # Retry on 5xx (server errors) and 429 (rate limit)
+                if e.code in (429, 500, 502, 503, 504) and attempt < max_attempts:
+                    wait = 2 ** attempt  # 2s, 4s
+                    print(f'discord-send: HTTP {e.code}, retrying in {wait}s (attempt {attempt}/{max_attempts})', file=sys.stderr)
+                    time.sleep(wait)
+                    continue
+                print(f'discord-send: HTTP {e.code}', file=sys.stderr)
+                sys.exit(1)
+            except urllib.error.URLError as e:
+                if attempt < max_attempts:
+                    wait = 2 ** attempt
+                    print(f'discord-send: connection error: {e.reason}, retrying in {wait}s (attempt {attempt}/{max_attempts})', file=sys.stderr)
+                    time.sleep(wait)
+                    continue
+                print(f'discord-send: connection error: {e.reason}', file=sys.stderr)
+                sys.exit(1)
 
     last_msg_id = None
 
