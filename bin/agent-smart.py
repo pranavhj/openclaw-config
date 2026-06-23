@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""agent-smart.py — wrapper around `claude --continue` that auto-compacts large sessions.
+"""agent-smart.py — wrapper around `claude --continue` with session size monitoring.
 
-When the most recent session file exceeds THRESHOLD_KB, creates a new session
-keeping the last KEEP_PAIRS user/assistant exchanges as context.
+Logs a warning when the most recent session file exceeds THRESHOLD_BYTES.
+Does NOT auto-compact. To compact manually, pass --keep-pairs N:
+  python agent-smart.py --keep-pairs 5 [claude args...]
 
-Usage: python agent-smart.py [claude args...]
+Usage: python agent-smart.py [--keep-pairs N] [claude args...]
 
 NOTE: Session directory naming on Windows must be verified.
   Claude Code derives the session dir key from the CWD path.
@@ -24,8 +25,7 @@ import sys
 import uuid
 from pathlib import Path
 
-THRESHOLD_KB = 200
-KEEP_PAIRS = 10
+THRESHOLD_BYTES = 1_000_000  # 1 MB — warn if session file exceeds this
 
 
 def get_cwd_key() -> str:
@@ -39,22 +39,32 @@ def get_cwd_key() -> str:
     return re.sub(r'[^a-zA-Z0-9]', '-', cwd)
 
 
-def maybe_compact(session_dir: Path, keep_pairs: int = KEEP_PAIRS) -> None:
-    """Compact the current session file if it exceeds the size threshold."""
+def check_session_size(session_dir: Path) -> None:
+    """Log a warning if the current session file exceeds THRESHOLD_BYTES."""
     if not session_dir.is_dir():
         return
-
     jsonl_files = list(session_dir.glob('*.jsonl'))
     if not jsonl_files:
         return
+    current = max(jsonl_files, key=lambda p: p.stat().st_mtime)
+    size = current.stat().st_size
+    if size > THRESHOLD_BYTES:
+        print(f'[agent-smart] session {size // 1024}KB > {THRESHOLD_BYTES // 1024}KB — large session, consider compacting with --keep-pairs N')
 
+
+def compact_session(session_dir: Path, keep_pairs: int) -> None:
+    """Compact the current session file, keeping the last keep_pairs user/assistant exchanges.
+
+    Only called when --keep-pairs N is explicitly passed on the command line.
+    """
+    if not session_dir.is_dir():
+        return
+    jsonl_files = list(session_dir.glob('*.jsonl'))
+    if not jsonl_files:
+        return
     current = max(jsonl_files, key=lambda p: p.stat().st_mtime)
     size_kb = current.stat().st_size // 1024
-    if size_kb <= THRESHOLD_KB:
-        return
-
-    print(f'[agent-smart] session {size_kb}KB > {THRESHOLD_KB}KB — compacting, keeping last {keep_pairs} pairs')
-
+    print(f'[agent-smart] compacting session ({size_kb}KB) — keeping last {keep_pairs} pairs')
     try:
         lines = current.read_text(encoding='utf-8', errors='replace').splitlines(keepends=True)
         msg_entries = []
@@ -93,8 +103,9 @@ def maybe_compact(session_dir: Path, keep_pairs: int = KEEP_PAIRS) -> None:
 
 def main():
     # Strip --keep-pairs N early — it's our flag, not a claude arg.
+    # No default: compaction only happens when --keep-pairs is explicitly passed.
     args = list(sys.argv[1:])
-    keep_pairs = KEEP_PAIRS
+    keep_pairs = None
     if '--keep-pairs' in args:
         idx = args.index('--keep-pairs')
         keep_pairs = int(args[idx + 1])
@@ -102,7 +113,10 @@ def main():
 
     cwd_key = get_cwd_key()
     session_dir = Path.home() / '.claude' / 'projects' / cwd_key
-    maybe_compact(session_dir, keep_pairs)
+    if keep_pairs is not None:
+        compact_session(session_dir, keep_pairs)
+    else:
+        check_session_size(session_dir)
 
     # Timeout for Claude execution (default 20 minutes = 1200 seconds).
     # Can be overridden via CLAUDE_TIMEOUT environment variable.

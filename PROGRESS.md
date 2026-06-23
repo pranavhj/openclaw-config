@@ -1,8 +1,8 @@
 # openclaw-config
 
 ## State
-Currently: Bot and delegate stable; architecture fixes deployed (OC-034)
-Last session: 2026-06-19
+Currently: Bot and delegate stable; agent-smart compaction disabled (OC-035)
+Last session: 2026-06-22
 
 ## Done
 - Discord bot (discord-bot.py), delegate pipeline, agent-smart.py — stable
@@ -11,6 +11,7 @@ Last session: 2026-06-19
 - delegate.py: openclaw-config now visible as project (removed from EXCLUDE_NAMES)
 - OC-033: Triage improvements — removed 10-min timeouts, always use gateway, opus model, attachment skip
 - OC-034: Architecture fixes — gateway log date UTC→local, ALLOWED_USER from config, project discovery consolidated, discord-send retry
+- OC-035: agent-smart.py — no auto-compact; warn only at 1MB; --keep-pairs opts in to compaction explicitly
 
 ## Next
 - OC-027: NSSM service broken (logon failure) — bot runs manually for now

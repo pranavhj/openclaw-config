@@ -40,3 +40,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-032](issues/OC-032-audit-no-reply-false-positive.md) | bug | fixed | Nightly audit no_reply false positive: delegate_reply overridden by delegate_exit, SENT-only outputs skipped | `fix(OC-032)` |
 | [OC-033](issues/OC-033-triage-improvements.md) | feature | fixed | Triage improvements: remove unreliable 10-min timeouts, always use gateway, skip triage for attachments, switch to opus model | `feat(OC-033)` |
 | [OC-034](issues/OC-034-architecture-fixes.md) | bug | fixed | Architecture fixes: gateway log date UTC→local, ALLOWED_USER from config, consolidate project discovery, discord-send retry | `fix(OC-034)` |
+| [OC-035](issues/OC-035-agent-smart-no-autocompact.md) | feature | fixed | agent-smart: disable auto-compact, raise warning threshold to 1MB, --keep-pairs opt-in only | `feat(OC-035)` |
