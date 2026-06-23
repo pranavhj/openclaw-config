@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """agent-smart.py — wrapper around `claude --continue` with session size monitoring.
 
-Logs a warning when the most recent session file exceeds THRESHOLD_BYTES.
-Does NOT auto-compact. To compact manually, pass --keep-pairs N:
-  python agent-smart.py --keep-pairs 5 [claude args...]
+Two thresholds:
+  WARN_BYTES (200KB): log a notice, no action
+  COMPACT_BYTES (1MB): auto-compact, keeping DEFAULT_KEEP_PAIRS user/assistant pairs
 
-Usage: python agent-smart.py [--keep-pairs N] [claude args...]
+Usage:
+  python agent-smart.py [--keep-pairs N] [--compact-only] [claude args...]
+
+  --keep-pairs N    Override default pairs to keep when compacting (default: 5)
+  --compact-only    Compact the session and exit without running claude
+                    (used by the 'compact <project>' Discord command)
 
 NOTE: Session directory naming on Windows must be verified.
   Claude Code derives the session dir key from the CWD path.
@@ -25,7 +30,9 @@ import sys
 import uuid
 from pathlib import Path
 
-THRESHOLD_BYTES = 1_000_000  # 1 MB — warn if session file exceeds this
+WARN_BYTES = 200_000        # 200 KB — log a notice, no action
+COMPACT_BYTES = 1_000_000   # 1 MB — auto-compact
+DEFAULT_KEEP_PAIRS = 5
 
 
 def get_cwd_key() -> str:
@@ -39,28 +46,14 @@ def get_cwd_key() -> str:
     return re.sub(r'[^a-zA-Z0-9]', '-', cwd)
 
 
-def check_session_size(session_dir: Path) -> None:
-    """Log a warning if the current session file exceeds THRESHOLD_BYTES."""
-    if not session_dir.is_dir():
-        return
-    jsonl_files = list(session_dir.glob('*.jsonl'))
-    if not jsonl_files:
-        return
-    current = max(jsonl_files, key=lambda p: p.stat().st_mtime)
-    size = current.stat().st_size
-    if size > THRESHOLD_BYTES:
-        print(f'[agent-smart] session {size // 1024}KB > {THRESHOLD_BYTES // 1024}KB — large session, consider compacting with --keep-pairs N')
-
-
 def compact_session(session_dir: Path, keep_pairs: int) -> None:
-    """Compact the current session file, keeping the last keep_pairs user/assistant exchanges.
-
-    Only called when --keep-pairs N is explicitly passed on the command line.
-    """
+    """Compact the current session file, keeping the last keep_pairs user/assistant exchanges."""
     if not session_dir.is_dir():
+        print(f'[agent-smart] no session dir at {session_dir}')
         return
     jsonl_files = list(session_dir.glob('*.jsonl'))
     if not jsonl_files:
+        print(f'[agent-smart] no session files in {session_dir}')
         return
     current = max(jsonl_files, key=lambda p: p.stat().st_mtime)
     size_kb = current.stat().st_size // 1024
@@ -101,22 +94,46 @@ def compact_session(session_dir: Path, keep_pairs: int) -> None:
         print(f'[agent-smart] compaction error: {e}', file=sys.stderr)
 
 
+def check_and_maybe_compact(session_dir: Path, keep_pairs: int) -> None:
+    """Warn at WARN_BYTES; auto-compact at COMPACT_BYTES."""
+    if not session_dir.is_dir():
+        return
+    jsonl_files = list(session_dir.glob('*.jsonl'))
+    if not jsonl_files:
+        return
+    current = max(jsonl_files, key=lambda p: p.stat().st_mtime)
+    size = current.stat().st_size
+    if size >= COMPACT_BYTES:
+        print(f'[agent-smart] session {size // 1024}KB >= {COMPACT_BYTES // 1024}KB — auto-compacting (keeping last {keep_pairs} pairs)')
+        compact_session(session_dir, keep_pairs)
+    elif size >= WARN_BYTES:
+        print(f'[agent-smart] session {size // 1024}KB >= {WARN_BYTES // 1024}KB — approaching limit')
+
+
 def main():
-    # Strip --keep-pairs N early — it's our flag, not a claude arg.
-    # No default: compaction only happens when --keep-pairs is explicitly passed.
+    # Strip our flags early — they are not claude args.
     args = list(sys.argv[1:])
-    keep_pairs = None
+
+    # --keep-pairs N: override default pairs to keep when compacting.
+    keep_pairs = DEFAULT_KEEP_PAIRS
     if '--keep-pairs' in args:
         idx = args.index('--keep-pairs')
         keep_pairs = int(args[idx + 1])
         args = args[:idx] + args[idx + 2:]
 
+    # --compact-only: compact and exit without running claude.
+    compact_only = '--compact-only' in args
+    if compact_only:
+        args.remove('--compact-only')
+
     cwd_key = get_cwd_key()
     session_dir = Path.home() / '.claude' / 'projects' / cwd_key
-    if keep_pairs is not None:
+
+    if compact_only:
         compact_session(session_dir, keep_pairs)
-    else:
-        check_session_size(session_dir)
+        return
+
+    check_and_maybe_compact(session_dir, keep_pairs)
 
     # Timeout for Claude execution (default 20 minutes = 1200 seconds).
     # Can be overridden via CLAUDE_TIMEOUT environment variable.

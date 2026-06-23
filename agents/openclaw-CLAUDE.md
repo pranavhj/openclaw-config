@@ -77,6 +77,7 @@ Tool invoke (no sub-session) — read project CLAUDE.md first, then run the matc
 | run test / execute script / inline test | `test-inline` (pass script as arg) |
 | screenshot / capture screen | `test-screenshot` (save to /tmp, send to Discord) |
 | app state / what activity / view tree | `test-state` |
+| add note / update note / diary note (dairy app only) | `add-note` — parse sections from user message, fill in `--date`, `--energy`, `--work`, `--training`, `--study`, `--personal` args; omit args for sections not mentioned so existing content is preserved |
 
 Project work (spawn sub-session) — for: fix, add, change, implement, refactor, write code.
 Sub-session reads the project CLAUDE.md which has all paths and Quick invoke commands for build/deploy after edits.
@@ -85,6 +86,12 @@ New project — call directly (no sub-session needed):
 `bash /d/MyData/Software/openclaw-config/bin/android-new.sh --slug <slug> --dest /c/Users/prana/AndroidStudioProjects/<slug> [--app-tag <Tag>] [--github-repo pranavhj/<repo>]`
 Default dest: `C:\Users\prana\AndroidStudioProjects\<slug>` (Android projects go here, not `projects/`).
 Scaffolds project + generates CLAUDE.md + PROGRESS.md automatically. Read `D:\MyData\Software\openclaw-config\agents\android.md` for toolchain reference.
+
+**Compact project session** — user says "compact <project>" or "compact <project> session" or "reset context <project>":
+- Match the project name against the known projects list to get the full path.
+- Run: `(cd <full_path> && python D:\MyData\Software\openclaw-config\bin\agent-smart.py --compact-only)`
+- Capture stdout and send it to Discord as the result. Output: SENT.
+- If no project matches, ask the user to clarify which project.
 
 **Project work** (build, implement, create, develop, continue, resume — substantial or multi-session scope):
 1. Match the request against the known projects list to find the project.
@@ -126,7 +133,7 @@ Send a brief Discord message before each major phase so the user knows progress:
 
 4. Output: SENT
 
-**How it works:** `--print` is one-shot — the sub-session spawns, does the work, sends to Discord, and exits. The JSONL session history in that project dir persists between calls. Each new message spawns a fresh process that reads the full prior history via `--continue`. `agent-smart.py` auto-compacts sessions >100KB (keeps last 5 pairs by default) to control context size and credit usage. Use `--keep-pairs N` in the spawn command to override per-project — e.g. `--keep-pairs 6` for complex projects with long tool-call chains. PROGRESS.md is a lightweight human-readable summary on top of that.
+**How it works:** `--print` is one-shot — the sub-session spawns, does the work, sends to Discord, and exits. The JSONL session history in that project dir persists between calls. Each new message spawns a fresh process that reads the full prior history via `--continue`. `agent-smart.py` logs a notice at 200KB and auto-compacts at 1MB (keeps last 5 pairs by default). Use `--keep-pairs N` in the spawn command to override per-project — e.g. `--keep-pairs 6` for complex projects with long tool-call chains. To compact manually from Discord, say "compact <project>". PROGRESS.md is a lightweight human-readable summary on top of that.
 
 ## openclaw system
 
