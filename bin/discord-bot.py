@@ -158,7 +158,8 @@ _PREFIX_BLOCKLIST = {'this', 'that', 'with', 'from', 'have', 'make', 'take', 'gi
                      'than', 'them', 'they', 'your', 'above', 'after', 'about', 'again',
                      'only', 'still', 'should', 'would', 'could', 'going', 'thing',
                      'every', 'write', 'check', 'start', 'stock', 'phase', 'change',
-                     'claude', 'tests', 'test', 'step', 'same', 'send', 'open', 'close'}
+                     'claude', 'tests', 'test', 'step', 'same', 'send', 'open', 'close',
+                     'screen', 'scree'}
 
 
 def _match_project(message: str) -> str:
@@ -849,6 +850,7 @@ async def on_message(message):
     # --- Q&A triage: ask LLM whether to answer directly or delegate ---
     # Always runs when gateway token is configured (no cooldown, no message-length limit).
     # Skip triage when attachments are present — always delegate (triage can't see files).
+    decision = ''  # 'answer', 'delegate', 'error', or '' if triage skipped
     triage_slug = ''
     if _gateway_token and not attach_count:
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'qa_triage_attempt',
@@ -887,13 +889,27 @@ async def on_message(message):
         _log_human(f'[{sid}] Q&A triage: skipped (has {attach_count} attachments)')
 
     # --- Project slug matching + per-project concurrency ---
-    # Priority: triage slug > keyword match (fallback) > router
+    # Priority: triage slug > keyword match > continuity fallback > router
     if triage_slug and triage_slug != 'router' and triage_slug in _known_projects:
         slug = triage_slug
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'slug_from_triage', 'slug': slug})
         _log_human(f'[{sid}] Slug from triage: {slug}')
     else:
         slug = _match_project(content)
+        # When triage errored AND keyword matching also returns 'router', fall back to
+        # the last active slug for this channel (conversation continuity).
+        # Handles gateway-down/timeout scenarios for context-dependent follow-ups
+        # that contain no explicit project keywords.
+        if slug == 'router' and decision == 'error':
+            _ch = str(message.channel.id)
+            if _ch in _last_channel_slug:
+                _last_slug, _last_mono = _last_channel_slug[_ch]
+                _elapsed = time.monotonic() - _last_mono
+                if _elapsed < 600 and _last_slug in _known_projects:
+                    slug = _last_slug
+                    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'slug_continuity_fallback',
+                         'slug': slug, 'elapsed_s': int(_elapsed), 'reason': 'triage_error'})
+                    _log_human(f'[{sid}] Continuity fallback (triage error): slug={slug} ({int(_elapsed)}s ago)')
 
     # Check if this slug already has a running delegate
     if slug in _running_delegates:

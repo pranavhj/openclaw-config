@@ -42,3 +42,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-034](issues/OC-034-architecture-fixes.md) | bug | fixed | Architecture fixes: gateway log date UTC→local, ALLOWED_USER from config, consolidate project discovery, discord-send retry | `fix(OC-034)` |
 | [OC-035](issues/OC-035-agent-smart-no-autocompact.md) | feature | fixed | agent-smart: disable auto-compact, raise warning threshold to 1MB, --keep-pairs opt-in only | `feat(OC-035)` |
 | [OC-036](issues/OC-036-compact-command-smart-thresholds.md) | feature | fixed | agent-smart dual thresholds (warn 200KB, compact 1MB, default 5 pairs) + Discord compact command | `feat(OC-036)` |
+| [OC-037](issues/OC-037-misrouting-triage-error-continuity.md) | bug | fixed | Project misrouting when triage gateway errors: add continuity fallback + fix "screen" prefix false positive | `fix(OC-037)` |
