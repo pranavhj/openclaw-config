@@ -209,22 +209,22 @@ if na:
     (p if 'failure_detected' in issue_keys else f)('failure_detected issue present')
     (p if 'no_reply' not in issue_keys else f)('no_reply suppressed when failure_detected')
 
-    # near_timeout (>=110000ms)
-    near_to = make_interaction(total_ms=115000)
+    # near_timeout (>=1080000ms = 18min, 90% of 20min MAX_AGENT_SECONDS)
+    near_to = make_interaction(total_ms=1100000)
     na.check_interaction(near_to)
-    (p if any(x[0] == 'near_timeout' for x in near_to['issues']) else f)('near_timeout at 115s')
+    (p if any(x[0] == 'near_timeout' for x in near_to['issues']) else f)('near_timeout at 1100s')
     (p if any(x[1] == 'high' for x in near_to['issues'] if x[0] == 'near_timeout') else f)('near_timeout severity=high')
 
-    # slow (>=60000ms, <110000ms)
-    slow = make_interaction(total_ms=75000)
+    # slow (>=300000ms = 5min, <1080000ms)
+    slow = make_interaction(total_ms=350000)
     na.check_interaction(slow)
-    (p if any(x[0] == 'slow' for x in slow['issues']) else f)('slow at 75s')
+    (p if any(x[0] == 'slow' for x in slow['issues']) else f)('slow at 350s')
     (p if any(x[1] == 'medium' for x in slow['issues'] if x[0] == 'slow') else f)('slow severity=medium')
 
-    # Not slow at 59s
-    not_slow = make_interaction(total_ms=59000)
+    # Not slow at 290s
+    not_slow = make_interaction(total_ms=290000)
     na.check_interaction(not_slow)
-    (p if not any(x[0] == 'slow' for x in not_slow['issues']) else f)('no slow at 59s')
+    (p if not any(x[0] == 'slow' for x in not_slow['issues']) else f)('no slow at 290s')
 
     # tiny_prompt
     tiny = make_interaction(prompt_bytes=500)
@@ -397,12 +397,12 @@ if na:
         (p if cg3.called else f)('phase3: call_gateway called when high issues present')
         (p if result_high == 'mock-suggestions' else f)(f'phase3: response forwarded (got {result_high})')
         prompt3 = cg3.call_args[0][1]
-        (p if 'Total interactions' in prompt3 else f)('phase3: prompt has interaction count')
+        (p if 'Router interactions' in prompt3 else f)('phase3: prompt has interaction count')
         (p if 'High-severity' in prompt3 else f)('phase3: prompt has high-severity count')
 
     # Slow interactions → call gateway even without high
     slow_i = make_i_with_issues([])
-    slow_i['total_ms'] = 70000
+    slow_i['total_ms'] = 350000  # 5min+ triggers slow
     with mock.patch.object(na, 'call_gateway', return_value='mock-slow') as cg4:
         result_slow = na.phase3_optimization('tok', [slow_i], gw_stats_none, '2026-06-13')
         (p if cg4.called else f)('phase3: call_gateway called when slow interactions present')

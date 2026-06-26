@@ -81,6 +81,8 @@
   "gateway": {
     "port": 18789,
     "mode": "local",
+    "max_concurrent": 3,
+    "notify_discord": false,
     "controlUi": {
       "enabled": false
     },

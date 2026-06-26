@@ -889,27 +889,34 @@ async def on_message(message):
         _log_human(f'[{sid}] Q&A triage: skipped (has {attach_count} attachments)')
 
     # --- Project slug matching + per-project concurrency ---
-    # Priority: triage slug > keyword match > continuity fallback > router
-    if triage_slug and triage_slug != 'router' and triage_slug in _known_projects:
+    # Priority: keyword match > triage slug > continuity fallback > router
+    # Keyword match is most reliable when it fires (explicit project name in message).
+    # Triage has context but can misidentify follow-ups; continuity catches the rest.
+    _ch = str(message.channel.id)
+    keyword_slug = _match_project(content)
+    if keyword_slug != 'router':
+        slug = keyword_slug
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'slug_from_keyword', 'slug': slug})
+        _log_human(f'[{sid}] Slug from keyword: {slug}')
+    elif triage_slug and triage_slug != 'router' and triage_slug in _known_projects:
         slug = triage_slug
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'slug_from_triage', 'slug': slug})
         _log_human(f'[{sid}] Slug from triage: {slug}')
     else:
-        slug = _match_project(content)
-        # When triage errored AND keyword matching also returns 'router', fall back to
-        # the last active slug for this channel (conversation continuity).
-        # Handles gateway-down/timeout scenarios for context-dependent follow-ups
-        # that contain no explicit project keywords.
-        if slug == 'router' and decision == 'error':
-            _ch = str(message.channel.id)
-            if _ch in _last_channel_slug:
-                _last_slug, _last_mono = _last_channel_slug[_ch]
-                _elapsed = time.monotonic() - _last_mono
-                if _elapsed < 600 and _last_slug in _known_projects:
-                    slug = _last_slug
-                    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'slug_continuity_fallback',
-                         'slug': slug, 'elapsed_s': int(_elapsed), 'reason': 'triage_error'})
-                    _log_human(f'[{sid}] Continuity fallback (triage error): slug={slug} ({int(_elapsed)}s ago)')
+        # Neither keyword nor triage identified a specific project — use continuity.
+        # Activates when: (a) triage returned 'router', (b) triage errored, (c) no triage.
+        # Previously only activated on triage error — now handles all no-match cases so
+        # follow-ups like "Yes go ahead" work even when triage can't identify the project.
+        slug = 'router'
+        if _ch in _last_channel_slug:
+            _last_slug, _last_mono = _last_channel_slug[_ch]
+            _elapsed = time.monotonic() - _last_mono
+            if _elapsed < 600 and _last_slug in _known_projects:
+                slug = _last_slug
+                reason = 'triage_error' if decision == 'error' else 'triage_no_match'
+                _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'slug_continuity_fallback',
+                     'slug': slug, 'elapsed_s': int(_elapsed), 'reason': reason})
+                _log_human(f'[{sid}] Continuity fallback ({reason}): slug={slug} ({int(_elapsed)}s ago)')
 
     # Check if this slug already has a running delegate
     if slug in _running_delegates:

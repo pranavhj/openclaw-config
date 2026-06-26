@@ -118,3 +118,27 @@ System-wide scripts in `bin/` shared across all Android projects. Each project's
 **android-new.sh:** writes `local.properties` for CLI builds; generated CLAUDE.md has all 7 quick invoke entries
 
 **Known projects using this tooling:** `AndroidStudioProjects/TableNew`
+
+---
+
+## Nightly audit (added 2026-06-14)
+
+`bin/nightly-audit.py` — daily log health check, no tokens used (Phase 1 rule-based).
+
+Runs at 03:30 via Windows Task Scheduler (task name: `NightlyAudit`).
+Audits yesterday's router + gateway timelines and sends a Discord DM report.
+
+**Rule checks:** `exit_nonzero`, `no_reply`, `near_timeout`, `slow`, `failure_detected`, `stdout_forward`, `stale_lock`, `lock_blocked`, `tiny_prompt`, `user_stopped`
+
+**Manual run:**
+```
+python D:\MyData\Software\openclaw-config\bin\nightly-audit.py             # yesterday
+python D:\MyData\Software\openclaw-config\bin\nightly-audit.py 2026-06-13  # specific date
+```
+
+**Re-create Task Scheduler task (run as admin):**
+```
+schtasks /create /tn "NightlyAudit" /tr "python D:\MyData\Software\openclaw-config\bin\nightly-audit.py" /sc DAILY /st 03:30 /f
+```
+
+Issue: OC-030 (`issues/OC-030-nightly-audit.md`)
