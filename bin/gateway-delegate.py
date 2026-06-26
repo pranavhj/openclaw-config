@@ -344,10 +344,16 @@ def main():
 
         if proc.returncode != 0:
             stderr = proc.stderr.strip()
+            stdout = proc.stdout.strip()
+            # Claude errors (rate limits, usage limits) go to stdout, not stderr
+            error_detail = stdout or stderr
             _tl({'ts': _ts_iso(), 'sid': _SID, 'event': 'agent_failed',
-                 'project': slug, 'exit_code': proc.returncode, 'stderr': stderr[:500]})
+                 'project': slug, 'exit_code': proc.returncode, 'stderr': stderr[:500],
+                 'stdout_preview': stdout[:200]})
             _log_stderr(f'agent FAILED: exit={proc.returncode}')
-            print(f'Agent failed (exit {proc.returncode}): {stderr[:300]}', file=sys.stderr)
+            if error_detail:
+                _log_stderr(f'agent error: {error_detail[:200]}')
+            print(f'Agent failed (exit {proc.returncode}): {error_detail[:300]}', file=sys.stderr)
             sys.exit(1)
 
         response = extract_response(t_wall, proc.stdout, str(work_dir))

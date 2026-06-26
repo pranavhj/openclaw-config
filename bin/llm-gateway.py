@@ -306,12 +306,18 @@ async def handle_ask(request: web.Request):
                 status=504,
             )
         except Exception as e:
+            err_str = str(e)
             _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'ask_error',
-                 'project': project, 'error': str(e)[:300]})
-            _log_human(f'[{sid}] ERROR project={project} error={str(e)[:200]}')
-            log.exception('[%s] ask failed: project=%s', sid, project)
+                 'project': project, 'error': err_str[:300]})
+            _log_human(f'[{sid}] ERROR project={project} error={err_str[:200]}')
+            # Delegate failures are handled — log as error (no traceback)
+            # Unexpected exceptions get full traceback for debugging
+            if isinstance(e, RuntimeError) and err_str.startswith('Delegate failed'):
+                log.error('[%s] ask failed: project=%s error=%s', sid, project, err_str[:200])
+            else:
+                log.exception('[%s] ask failed: project=%s', sid, project)
             return web.json_response(
-                {'status': 'error', 'error': str(e)},
+                {'status': 'error', 'error': err_str},
                 status=500,
             )
         finally:
