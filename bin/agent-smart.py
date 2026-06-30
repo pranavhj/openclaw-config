@@ -2,13 +2,13 @@
 """agent-smart.py — wrapper around `claude --continue` with session size monitoring.
 
 Two thresholds:
-  WARN_BYTES (200KB): log a notice, no action
-  COMPACT_BYTES (1MB): auto-compact, keeping DEFAULT_KEEP_PAIRS user/assistant pairs
+  WARN_BYTES (100KB): log a notice, no action
+  COMPACT_BYTES (200KB): auto-compact, keeping DEFAULT_KEEP_PAIRS user/assistant pairs
 
 Usage:
   python agent-smart.py [--keep-pairs N] [--compact-only] [claude args...]
 
-  --keep-pairs N    Override default pairs to keep when compacting (default: 5)
+  --keep-pairs N    Override default pairs to keep when compacting (default: 4)
   --compact-only    Compact the session and exit without running claude
                     (used by the 'compact <project>' Discord command)
 
@@ -30,9 +30,9 @@ import sys
 import uuid
 from pathlib import Path
 
-WARN_BYTES = 200_000        # 200 KB — log a notice, no action
-COMPACT_BYTES = 1_000_000   # 1 MB — auto-compact
-DEFAULT_KEEP_PAIRS = 5
+WARN_BYTES = 100_000        # 100 KB — log a notice, no action
+COMPACT_BYTES = 200_000     # 200 KB — auto-compact
+DEFAULT_KEEP_PAIRS = 4      # 4 pairs = 8 messages kept after compact
 
 
 def get_cwd_key() -> str:
