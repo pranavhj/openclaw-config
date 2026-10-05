@@ -272,11 +272,28 @@ async def _rc_pick(message, sid: str, ch: str, n: int):
 
 
 async def _handle_rc(message, act: dict, sid: str):
+    """Entry point: never let an rc failure go unanswered."""
+    try:
+        await _handle_rc_inner(message, act, sid)
+    except Exception as e:
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_failed', 'label': act.get('action'),
+             'error_type': type(e).__name__, 'error': str(e)[:500]})
+        log.error('[%s] rc %s crashed: %s', sid, act.get('action'), e, exc_info=True)
+        try:
+            await message.reply(f'❌ `rc {act.get("action")}` failed: {type(e).__name__}: {str(e)[:500]}\n'
+                                f'{rc_commands.FOOTER}')
+        except Exception as e2:
+            log.error('[%s] rc error reply failed: %s', sid, e2)
+
+
+async def _handle_rc_inner(message, act: dict, sid: str):
     ch = str(message.channel.id)
     a = act['action']
     _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_command', 'action': a,
          'project': act.get('project'), 'arg': act.get('arg'), 'n': act.get('n')})
     _log_human(f'[{sid}] RC command: {a} {act.get("project") or act.get("name") or act.get("n") or ""}')
+    if a not in ('pick', 'copy', 'takeover'):
+        _rc_pending.pop(ch, None)  # a new rc command supersedes any open question
 
     if a == 'help':
         await message.reply(rc_commands.USAGE)
@@ -316,8 +333,11 @@ async def _handle_rc(message, act: dict, sid: str):
     elif a == 'takeover':
         pend = _rc_pending.pop(ch)
         _log_human(f'[{sid}] RC takeover of {pend["session_id"][:8]} in {pend["path"]}')
-        await _rc_run(message, sid, f'Taking over `{pend["session_id"][:8]}` in `{Path(pend["path"]).name}`',
-                      rc_sessions.takeover, pend['path'], pend['session_id'], Path(pend['path']).name)
+        res = await _rc_run(message, sid, f'Taking over `{pend["session_id"][:8]}` in `{Path(pend["path"]).name}`',
+                            rc_sessions.takeover, pend['path'], pend['session_id'], Path(pend['path']).name)
+        if res is None:  # e.g. busy: keep the question open so `takeover`/`copy` still work
+            _rc_pending[ch] = rc_commands.new_pending('elsewhere', path=pend['path'],
+                                                      session_id=pend['session_id'])
 
 
 # Common words that should never trigger prefix matching against project names
@@ -1004,6 +1024,10 @@ async def on_message(message):
     if _rc_act:
         await _handle_rc(message, _rc_act, sid)
         return
+    # Any non-rc message closes an open rc question, so a later bare "2" meant for
+    # something else can never start a session.
+    if _rc_pending.pop(str(message.channel.id), None) is not None:
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_pending_cleared'})
     # "!" prefix: send through the Discord pipeline even if the project is live on RC
     _force_discord = content.startswith('!')
     if _force_discord:
@@ -1101,7 +1125,10 @@ async def on_message(message):
 
     # OC-041 guard: project has a live Remote Control session -> point there instead of
     # running a second writer (delegate --continue) on the same conversation folder.
-    if slug in _known_projects and not _force_discord:
+    # Only for explicitly identified projects (keyword/triage, not continuity guesses),
+    # and never when attachments were sent (they would be dropped).
+    _slug_explicit = keyword_slug != 'router' or slug == triage_slug
+    if slug in _known_projects and _slug_explicit and not attach_count and not _force_discord:
         _rc_live = rc_sessions.live_rc_in_dir(_known_projects[slug])
         if _rc_live:
             _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_guard_redirect', 'slug': slug,

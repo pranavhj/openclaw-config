@@ -152,8 +152,10 @@ rc._launch_and_wait = lambda cmd, project, name, t: calls.append(('wake', cmd[-1
 rc.bg_session_ids = lambda: {'bg-1'}
 rc.session_records = lambda *a, **k: [
     {'sessionId': 'live-rc', 'jobId': 'liverc00', 'bridgeSessionId': 'session_L', 'pid': 1, 'cwd': str(proj)},
-    {'sessionId': 'live-term', 'pid': 2, 'status': 'busy', 'cwd': str(proj)},
-    {'sessionId': 'live-idle', 'pid': 3, 'status': 'idle', 'cwd': str(proj)},
+    {'sessionId': 'live-term', 'pid': 2, 'status': 'busy', 'kind': 'interactive', 'cwd': str(proj)},
+    {'sessionId': 'live-idle', 'pid': 3, 'status': 'idle', 'kind': 'interactive', 'cwd': str(proj)},
+    {'sessionId': 'live-bg', 'pid': 4, 'status': 'idle', 'kind': 'bg', 'jobId': 'livebg00', 'cwd': str(proj)},
+    {'sessionId': 'live-odd', 'pid': 5, 'status': 'idle', 'cwd': str(proj)},
 ]
 r = rc.resume_rc(proj, 'live-rc')
 check(r['reused'] and r['url'] == 'https://claude.ai/code/session_L' and calls == [], 'live RC -> reuse, no launch')
@@ -181,6 +183,14 @@ check(r.get('copied') and calls[-1] == ('start', 'bg-1'), 'bg wake without RC ->
 print('\n--- takeover ---')
 killed = []
 rc.kill_pid = lambda pid, *a, **k: killed.append(pid) or True
+rc.record_is_live = lambda rec: True
+stopped_jobs = []
+rc.stop_job = lambda job: stopped_jobs.append(job) or 'stopped'
+try:
+    rc.takeover(proj, 'live-odd')
+    f('unknown session kind must not be killed')
+except rc.RCError as e:
+    check('cannot be taken over' in str(e) and killed == [], 'unknown kind refused, nothing killed')
 try:
     rc.takeover(proj, 'live-term')
     f('busy terminal must not be taken over')
@@ -191,12 +201,25 @@ _state = {'killed': False}
 
 
 def _recs_after_kill(*a, **k):
-    return [] if killed else _recs_before()
+    return [] if (killed or stopped_jobs) else _recs_before()
 
 
 rc.session_records = _recs_after_kill
 rc.takeover(proj, 'live-idle')
 check(killed == [3] and calls[-1] == ('start', 'live-idle'), 'idle terminal killed then resumed same id')
+killed.clear()
+rc.takeover(proj, 'live-bg')
+check(stopped_jobs == ['livebg00'] and killed == [], 'bg session without RC is stopped via CLI, not killed')
+
+print('\n--- record_is_live (pid identity) ---')
+import importlib
+rc2 = importlib.reload(rc)
+me = os.getpid()
+real_start = rc2.proc_start_time(me)
+check(isinstance(real_start, int), 'proc_start_time returns FILETIME int for own pid')
+check(rc2.record_is_live({'pid': me, 'procStart': str(real_start)}), 'matching procStart -> live')
+check(not rc2.record_is_live({'pid': me, 'procStart': str(real_start + 1)}), 'reused pid (procStart mismatch) -> not live')
+check(not rc2.record_is_live({'pid': 0}), 'no pid -> not live')
 
 print('\n--- create_project ---')
 newp = rc.create_project(tmp, 'brandnew')

@@ -247,6 +247,40 @@ def pid_alive(pid: int | None) -> bool:
         return False
 
 
+def proc_start_time(pid: int) -> int | None:
+    """Process creation time as a Windows FILETIME int (same units as the session
+    record's `procStart`, verified 2026-10-05). None if unavailable."""
+    if sys.platform != 'win32' or not pid:
+        return None
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    h = k32.OpenProcess(0x1000, False, int(pid))
+    if not h:
+        return None
+    times = [wintypes.FILETIME() for _ in range(4)]
+    ok = k32.GetProcessTimes(h, *[ctypes.byref(t) for t in times])
+    k32.CloseHandle(h)
+    if not ok:
+        return None
+    return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+
+
+def record_is_live(rec: dict) -> bool:
+    """pid alive AND (on Windows) it is the same process that wrote the record, so a
+    stale record whose pid was reused by another program is never treated as live."""
+    pid = rec.get('pid')
+    if not pid_alive(pid):
+        return False
+    want = rec.get('procStart')
+    if want is None or sys.platform != 'win32':
+        return True
+    try:
+        return proc_start_time(pid) == int(want)
+    except (TypeError, ValueError):
+        return False
+
+
 def session_records(sessions_dir: Path = SESSIONS_DIR, alive_only: bool = True) -> list[dict]:
     """Records from ~/.claude/sessions/*.json (one per running claude process)."""
     recs = []
@@ -257,7 +291,7 @@ def session_records(sessions_dir: Path = SESSIONS_DIR, alive_only: bool = True) 
             rec = json.loads(f.read_text(encoding='utf-8'))
         except (OSError, json.JSONDecodeError):
             continue  # file being rewritten by its owner; next poll will see it
-        if alive_only and not pid_alive(rec.get('pid')):
+        if alive_only and not record_is_live(rec):
             continue
         recs.append(rec)
     return recs
@@ -386,6 +420,8 @@ def summarize_transcript(path: Path) -> dict:
                 o = json.loads(ln)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(o, dict):
+                continue
             t = o.get('type')
             if o.get('entrypoint'):
                 entrypoints.add(o['entrypoint'])
@@ -418,7 +454,13 @@ def list_conversations(project_path: str | Path, limit: int = 8, root: Path = TR
     d = transcript_dir(project_path, root)
     if not d:
         return []
-    files = sorted(d.glob('*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+    def _mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0  # deleted between glob and stat; summarize will skip it
+
+    files = sorted(d.glob('*.jsonl'), key=_mtime, reverse=True)
     out = []
     for f in files:
         try:
@@ -469,7 +511,16 @@ def _result(rec: dict, job_id: str, name: str, project: Path, reused: bool = Fal
 
 
 def _launch_and_wait(cmd: list[str], project: Path, name: str, timeout_s: float) -> dict:
-    out = _run_claude(cmd, cwd=project)
+    t0_ms = time.time() * 1000
+    try:
+        out = _run_claude(cmd, cwd=project)
+    except RCError:
+        # The CLI may have started a session before hanging: stop anything new in this folder.
+        for rec in live_in_dir(project):
+            if rec.get('jobId') and rec.get('startedAt', 0) >= t0_ms - 1000:
+                log.warning('launch failed; stopping orphan job %s', rec['jobId'])
+                stop_job(rec['jobId'])
+        raise
     if 'not trusted' in out.lower():
         raise RCError(f'workspace still not trusted: {out.strip()[:200]}')
     job_id = parse_job_id(out)
@@ -543,6 +594,7 @@ def resume_rc(project_path: str | Path, session_id: str, name: str | None = None
             log.warning('resume_rc: wake of %s gave no bridge (%s); starting a copy', session_id, e)
             res = start_rc(project, name, resume_id=session_id, timeout_s=timeout_s)
             res['copied'] = True
+            registry_remove(session_id)  # the copy is now the one to restore
             return res
     return start_rc(project, name, resume_id=session_id, timeout_s=timeout_s)
 
@@ -572,9 +624,22 @@ def takeover(project_path: str | Path, session_id: str, name: str | None = None,
         if rec.get('bridgeSessionId'):
             return resume_rc(project_path, session_id, name, timeout_s=timeout_s)
         status = rec.get('status')
+        if rec.get('kind') == 'bg' and rec.get('jobId'):
+            log.info('takeover: stopping bg session %s (no RC) instead of killing', rec['jobId'])
+            stop_job(rec['jobId'])
+            deadline = time.monotonic() + 10
+            while any(r.get('sessionId') == session_id for r in session_records()):
+                if time.monotonic() > deadline:
+                    raise RCError(f'background session {rec["jobId"]} did not stop within 10s')
+                time.sleep(0.5)
+            return resume_rc(project_path, session_id, name, timeout_s=timeout_s)
+        if rec.get('kind') != 'interactive':
+            raise RCError(f'session kind `{rec.get("kind")}` cannot be taken over \u2014 use `copy`.')
         if status != 'idle':
             raise RCError(f'the terminal session is `{status}`, not idle — not interrupting it. '
                           f'Try again when it has finished, or use `copy`.')
+        if not record_is_live(rec):  # re-check identity right before killing
+            raise RCError('terminal session changed while preparing takeover \u2014 try again.')
         log.warning('takeover: ending terminal claude pid=%s for session %s', rec.get('pid'), session_id)
         if not kill_pid(rec['pid']):
             raise RCError(f'could not end terminal process {rec["pid"]}')

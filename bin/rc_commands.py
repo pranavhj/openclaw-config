@@ -27,6 +27,7 @@ from pathlib import Path
 PENDING_TTL_S = 600
 FOOTER = '-# sent by claude'
 NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$')
+RESERVED = {'list', 'stop', 'restore', 'new', 'create', 'help'}
 
 USAGE = (
     '**Remote Control**\n'
@@ -44,7 +45,7 @@ def parse(content: str, known_projects: dict, pending: dict | None = None) -> di
     s = content.strip()
     low = s.lower()
     if pending and pending.get('expires', 0) > time.time():
-        if re.fullmatch(r'\d{1,2}', s):
+        if re.fullmatch(r'[0-9]{1,2}', s) and pending.get('kind') in ('convo', 'create'):
             return {'action': 'pick', 'n': int(s)}
         if low in ('copy', 'takeover') and pending.get('kind') == 'elsewhere':
             return {'action': low}
@@ -58,14 +59,14 @@ def parse(content: str, known_projects: dict, pending: dict | None = None) -> di
         return {'action': sub}
     if len(parts) == 3 and sub in ('create', 'new'):
         name = parts[2]
-        if not NAME_RE.match(name):
+        if not NAME_RE.match(name) or name.isdigit() or name.lower() in RESERVED:
             return {'action': 'bad_name', 'name': name}
         return {'action': 'create', 'name': name}
     if len(parts) == 3 and sub == 'stop':
         return {'action': 'stop', **_match(parts[2], known_projects)}
     if len(parts) in (2, 3):
         arg = parts[2].lower() if len(parts) == 3 else None
-        if arg is not None and arg != 'new' and not arg.isdigit():
+        if arg is not None and arg != 'new' and not re.fullmatch(r'[0-9]{1,2}', arg):
             return None
         m = _match(parts[1], known_projects)
         if m['project'] is None and not m['candidates']:
@@ -78,7 +79,7 @@ def _match(name: str, known_projects: dict) -> dict:
     key = name.lower()
     if key in known_projects:
         return {'project': key, 'path': known_projects[key], 'candidates': [], 'name': name}
-    cands = sorted(n for n in known_projects if key in n)[:10]
+    cands = sorted(n for n in known_projects if key in n)[:10] if len(key) >= 3 else []
     return {'project': None, 'path': None, 'candidates': cands, 'name': name}
 
 
@@ -129,7 +130,8 @@ def format_ready(res: dict) -> str:
                 f'session had no Remote Control)')
     else:
         head = f'✅ `{res["name"]}` is live on Remote Control'
-    return f'{head}\n{res["url"]}\n-# job `{res["job_id"]}` · sent by claude'
+    return (f'{head}\n{res["url"]}\n-# job `{res["job_id"]}` · permissions: bypass '
+            f'· sent by claude')
 
 
 def format_live_elsewhere(project: str, status: str | None) -> str:

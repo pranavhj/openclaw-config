@@ -1,7 +1,7 @@
 # openclaw-config
 
 ## State
-Currently: Bot and delegate stable; misrouting fix deployed (OC-037)
+Currently: OC-041 Discord `rc` command (Remote Control launcher) built + tested; bot restart needed to activate
 Last session: 2026-06-22
 
 ## Done
@@ -14,6 +14,7 @@ Last session: 2026-06-22
 - OC-035: agent-smart.py — no auto-compact; warn only at 1MB; --keep-pairs opts in to compaction explicitly
 - OC-036: agent-smart dual thresholds (warn 200KB, auto-compact 1MB, default 5 pairs); Discord "compact <project>" command via --compact-only flag + CLAUDE.md routing
 - OC-037: Project misrouting fix — continuity fallback when triage errors, "screen" prefix blocklist
+- 2026-10-05 OC-041: `rc` command — create/resume/takeover/list/stop/restore Remote Control sessions; delegate guard for RC-live projects
 
 ## Next
 - OC-027: NSSM service broken (logon failure) — bot runs manually for now
