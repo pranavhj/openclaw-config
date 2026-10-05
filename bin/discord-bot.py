@@ -150,6 +150,58 @@ def _refresh_projects():
         _projects_refreshed_at = now
 
 
+# ---------------------------------------------------------------------------
+# Remote Control sessions (OC-041): "rc <project> new"
+# ---------------------------------------------------------------------------
+
+import rc_sessions
+
+_RC_USAGE = ('Usage: `rc <project> new` — start a fresh Remote Control session in that project.\n'
+             '-# sent by claude')
+
+
+def _resolve_project(name: str) -> tuple[str | None, list[str]]:
+    """Exact (case-insensitive) project match -> (path, []); otherwise (None, candidates)."""
+    _refresh_projects()
+    key = name.lower()
+    if key in _known_projects:
+        return _known_projects[key], []
+    return None, sorted(n for n in _known_projects if key in n)[:10]
+
+
+async def _handle_rc(message, content: str, sid: str):
+    parts = content.split()
+    if len(parts) != 3 or parts[2].lower() != 'new':
+        await message.reply(_RC_USAGE)
+        return
+    name = parts[1]
+    path, candidates = _resolve_project(name)
+    if not path:
+        hint = ('Did you mean: ' + ', '.join(f'`{c}`' for c in candidates)) if candidates else 'No match.'
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_project_unresolved',
+             'name': name, 'candidates': candidates})
+        await message.reply(f'Unknown project `{name}`. {hint}\n-# sent by claude')
+        return
+    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_start', 'project': path, 'mode': 'new'})
+    _log_human(f'[{sid}] RC start (new) in {path}')
+    status = await message.reply(f'⏳ Starting Remote Control in `{Path(path).name}`…')
+    try:
+        res = await asyncio.to_thread(rc_sessions.start_rc, path, Path(path).name)
+    except rc_sessions.RCError as e:
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_start_failed', 'project': path,
+             'error': str(e)[:500]})
+        _log_human(f'[{sid}] RC start FAILED in {path}: {str(e)[:200]}')
+        log.error('[%s] rc start failed project=%s: %s', sid, path, e)
+        await status.edit(content=f'❌ Remote Control failed for `{Path(path).name}`:\n```\n{str(e)[:1500]}\n```')
+        return
+    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_bridge_ready', 'project': path,
+         'job_id': res['job_id'], 'session_id': res['session_id'],
+         'bridge_session_id': res['bridge_session_id']})
+    _log_human(f'[{sid}] RC ready in {path}: job={res["job_id"]} bridge={res["bridge_session_id"]}')
+    await status.edit(content=f'✅ `{res["name"]}` is live on Remote Control\n{res["url"]}\n'
+                              f'-# job `{res["job_id"]}` · sent by claude')
+
+
 # Common words that should never trigger prefix matching against project names
 _PREFIX_BLOCKLIST = {'this', 'that', 'with', 'from', 'have', 'make', 'take', 'give',
                      'come', 'some', 'what', 'when', 'where', 'which', 'will', 'were',
@@ -826,6 +878,11 @@ async def on_message(message):
             _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'stop_signal', 'status': 'failed', 'error': str(e)[:200]})
             log.error('[%s] stop signal failed: %s', sid, e)
             await message.reply(f'Failed to stop: {e}')
+        return
+
+    # Remote Control command (OC-041) — deterministic, bypasses triage
+    if content.strip().lower() == 'rc' or content.strip().lower().startswith('rc '):
+        await _handle_rc(message, content.strip(), sid)
         return
 
     env = None  # inherit environment; claude is already in PATH
