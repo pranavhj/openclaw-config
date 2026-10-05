@@ -27,7 +27,7 @@ UNFILTERED_ROOTS = [
     Path('D:/MyData/Software'),
 ]
 
-EXCLUDE_NAMES: set = set()
+EXCLUDE_NAMES: set = {'watchlatercleaner', 'claude-test-nomod'}
 
 
 def discover_projects() -> dict:
