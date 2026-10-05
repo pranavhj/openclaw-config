@@ -133,6 +133,23 @@ def main():
         compact_session(session_dir, keep_pairs)
         return
 
+    # OC-041: never run a second writer (--continue) on a folder whose conversation is
+    # live on Remote Control. The router forwards the BLOCKED line to Discord.
+    # A Discord message prefixed with "!" sets OPENCLAW_FORCE_DISCORD=1 to override.
+    import os
+    if '--continue' in args and os.environ.get('OPENCLAW_FORCE_DISCORD') != '1':
+        try:
+            sys.path.insert(0, str(Path(__file__).parent))
+            import rc_sessions
+            live = rc_sessions.live_rc_in_dir(Path.cwd())
+        except Exception as e:  # guard must never break normal runs
+            print(f'[agent-smart] RC guard skipped: {e}', file=sys.stderr)
+            live = []
+        if live:
+            print(f'BLOCKED: this project has a live Remote Control session — continue there: '
+                  f'{rc_sessions.rc_url(live[0])} (prefix the Discord message with ! to send anyway)')
+            sys.exit(3)
+
     check_and_maybe_compact(session_dir, keep_pairs)
 
     # Timeout for Claude execution (default 20 minutes = 1200 seconds).

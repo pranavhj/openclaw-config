@@ -1154,6 +1154,8 @@ async def on_message(message):
     log.info('[%s] dispatch channel=%s slug=%s msg_len=%d attachments=%d', sid, message.channel.id, slug, len(content), attach_count)
 
     try:
+        if _force_discord:  # "!" prefix: let agent-smart's RC guard (OC-041) allow --continue
+            env = {**(env or os.environ), 'OPENCLAW_FORCE_DISCORD': '1'}
         cmd = [sys.executable, str(DELEGATE_PY), 'discord', str(message.channel.id),
                '--slug', slug, content]
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'delegate_spawn',

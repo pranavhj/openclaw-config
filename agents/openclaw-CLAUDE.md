@@ -87,6 +87,14 @@ New project — call directly (no sub-session needed):
 Default dest: `C:\Users\prana\AndroidStudioProjects\<slug>` (Android projects go here, not `projects/`).
 Scaffolds project + generates CLAUDE.md + PROGRESS.md automatically. Read `D:\MyData\Software\openclaw-config\agents\android.md` for toolchain reference.
 
+**Remote Control** — user asks to start / open / resume / continue a project "on remote control", "on my phone", "in the Claude app", or to create a new project for remote control:
+- Do NOT spawn a sub-session. The bot has a deterministic `rc` command for this. Reply with the exact command to send:
+  - `rc <project>` — list that project's conversations and pick one to resume
+  - `rc <project> new` — fresh conversation
+  - `rc create <name>` — new project folder (bot asks where)
+  - `rc list` / `rc stop <project>` / `rc restore`
+- Send to Discord. Output: SENT.
+
 **Compact project session** — user says "compact <project>" or "compact <project> session" or "reset context <project>":
 - Match the project name against the known projects list to get the full path.
 - Run: `(cd <full_path> && python D:\MyData\Software\openclaw-config\bin\agent-smart.py --compact-only)`
@@ -131,7 +139,8 @@ Send a brief Discord message before each major phase so the user knows progress:
 <user's full message verbatim>")
 ```
 
-4. Output: SENT
+4. If the spawn command prints a line starting with `BLOCKED:` (the project has a live Remote Control session), send that line to Discord verbatim. Do not retry. Output: SENT
+5. Otherwise output: SENT
 
 **How it works:** `--print` is one-shot — the sub-session spawns, does the work, sends to Discord, and exits. The JSONL session history in that project dir persists between calls. Each new message spawns a fresh process that reads the full prior history via `--continue`. `agent-smart.py` logs a notice at 200KB and auto-compacts at 1MB (keeps last 5 pairs by default). Use `--keep-pairs N` in the spawn command to override per-project — e.g. `--keep-pairs 6` for complex projects with long tool-call chains. To compact manually from Discord, say "compact <project>". PROGRESS.md is a lightweight human-readable summary on top of that.
 
