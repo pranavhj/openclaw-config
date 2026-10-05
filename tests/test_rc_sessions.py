@@ -6,6 +6,7 @@ No live prerequisites. Uses tempdir config/session files; never touches ~/.claud
 """
 import io
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -88,6 +89,132 @@ try:
     f('missing folder should raise')
 except rc.RCError:
     p('missing folder raises RCError')
+
+print('\n--- review fixes ---')
+check(rc.parse_job_id('backgrounded · ABCDEF0123 · x') == 'abcdef0123', 'longer/uppercase job id not truncated')
+check(rc.safe_name('R&D 50%x') == 'R_D_50_x', 'cmd.exe metachars stripped from name')
+check(rc.safe_name('') == 'session', 'empty name -> session')
+cfg2 = tmp / 'claude2.json'
+cfg2.write_text(json.dumps({'projects': {}}), encoding='utf-8')
+_orig_sig = rc._stat_sig
+_calls = {'n': 0}
+
+
+def _flaky_sig(path):
+    _calls['n'] += 1
+    return (_calls['n'], 0)  # every stat differs -> "file changed under us" on each attempt
+
+
+rc._stat_sig = _flaky_sig
+check(not rc.ensure_trusted(proj, cfg2, attempts=2), 'concurrent change -> no write, gives up')
+check(json.loads(cfg2.read_text(encoding='utf-8')) == {'projects': {}}, 'config untouched when it kept changing')
+rc._stat_sig = _orig_sig
+check(list(tmp.glob('.claude.json.rc-*')) == [], 'no temp files left after aborted writes')
+
+print('\n--- transcripts ---')
+troot = tmp / 'tprojects'
+key = rc.re.sub(r'[^A-Za-z0-9]', '-', str(proj.resolve()))
+tdir = troot / key.lower()  # stored with different case, like 'c--Users-...'
+tdir.mkdir(parents=True)
+check(rc.transcript_dir(proj, troot) == tdir, 'transcript dir matched case-insensitively')
+check(rc.transcript_dir(tmp / 'nope', troot) is None, 'no transcript dir -> None')
+lines = [
+    {'type': 'user', 'entrypoint': 'cli', 'message': {'content': 'fix the login bug please'}},
+    {'type': 'assistant', 'entrypoint': 'cli', 'message': {'content': [{'type': 'text', 'text': 'ok'}]}},
+    {'type': 'user', 'entrypoint': 'cli', 'message': {'content': [{'type': 'tool_result', 'content': 'x'}]}},
+    {'type': 'user', 'entrypoint': 'cli', 'isMeta': True, 'message': {'content': 'meta'}},
+    {'type': 'user', 'entrypoint': 'cli', 'message': {'content': '<command-name>/clear</command-name>'}},
+    {'type': 'ai-title', 'aiTitle': 'Login bug'},
+    {'type': 'user', 'entrypoint': 'cli', 'message': {'content': [{'type': 'text', 'text': 'thanks'}]}},
+]
+(tdir / 'aaaa-1.jsonl').write_text('\n'.join(json.dumps(x) for x in lines) + '\nnot json\n', encoding='utf-8')
+(tdir / 'bbbb-2.jsonl').write_text(json.dumps({'type': 'user', 'entrypoint': 'sdk-cli',
+                                               'message': {'content': 'deploy apk'}}) + '\n', encoding='utf-8')
+(tdir / 'cccc-3.jsonl').write_text(json.dumps({'type': 'summary'}) + '\n', encoding='utf-8')
+os.utime(tdir / 'aaaa-1.jsonl', (1000, 1000))
+os.utime(tdir / 'bbbb-2.jsonl', (2000, 2000))
+s1 = rc.summarize_transcript(tdir / 'aaaa-1.jsonl')
+check(s1['title'] == 'Login bug', 'ai-title used')
+check(s1['user_turns'] == 2, 'tool results, meta and command wrappers not counted as turns')
+check(s1['first_prompt'] == 'fix the login bug please', 'first real prompt')
+check(s1['source'] == 'terminal', 'cli -> terminal')
+check(rc.summarize_transcript(tdir / 'bbbb-2.jsonl')['source'] == 'discord', 'sdk-cli -> discord')
+convs = rc.list_conversations(proj, root=troot)
+check([c['session_id'] for c in convs] == ['bbbb-2', 'aaaa-1'], 'newest first, empty transcript skipped')
+check([c['session_id'] for c in rc.list_conversations(proj, limit=1, root=troot)] == ['bbbb-2'], 'limit')
+
+print('\n--- resume_rc decisions (CLI mocked) ---')
+calls = []
+rc.ensure_trusted = lambda path, *a, **k: True
+rc.start_rc = lambda path, name=None, resume_id=None, **k: calls.append(('start', resume_id)) or \
+    {'url': 'u-start', 'session_id': resume_id}
+rc._launch_and_wait = lambda cmd, project, name, t: calls.append(('wake', cmd[-1])) or {'url': 'u-wake'}
+rc.bg_session_ids = lambda: {'bg-1'}
+rc.session_records = lambda *a, **k: [
+    {'sessionId': 'live-rc', 'jobId': 'liverc00', 'bridgeSessionId': 'session_L', 'pid': 1, 'cwd': str(proj)},
+    {'sessionId': 'live-term', 'pid': 2, 'status': 'busy', 'cwd': str(proj)},
+    {'sessionId': 'live-idle', 'pid': 3, 'status': 'idle', 'cwd': str(proj)},
+]
+r = rc.resume_rc(proj, 'live-rc')
+check(r['reused'] and r['url'] == 'https://claude.ai/code/session_L' and calls == [], 'live RC -> reuse, no launch')
+try:
+    rc.resume_rc(proj, 'live-term')
+    f('live terminal should raise RCLiveElsewhere')
+except rc.RCLiveElsewhere as e:
+    check(e.status == 'busy' and e.pid == 2, 'live terminal -> RCLiveElsewhere with status/pid')
+rc.resume_rc(proj, 'live-term', allow_copy=True)
+check(calls[-1] == ('start', 'live-term'), 'allow_copy -> start with --resume (copy)')
+rc.resume_rc(proj, 'bg-1')
+check(calls[-1] == ('wake', 'bg-1'), 'background session -> wake without flags')
+rc.resume_rc(proj, 'old-1')
+check(calls[-1] == ('start', 'old-1'), 'closed conversation -> --resume --remote-control')
+
+
+def _wake_fails(cmd, project, name, t):
+    raise rc.RCError('no bridge')
+
+
+rc._launch_and_wait = _wake_fails
+r = rc.resume_rc(proj, 'bg-1')
+check(r.get('copied') and calls[-1] == ('start', 'bg-1'), 'bg wake without RC -> copy fallback')
+
+print('\n--- takeover ---')
+killed = []
+rc.kill_pid = lambda pid, *a, **k: killed.append(pid) or True
+try:
+    rc.takeover(proj, 'live-term')
+    f('busy terminal must not be taken over')
+except rc.RCError as e:
+    check('not idle' in str(e) and killed == [], 'busy terminal refused, nothing killed')
+_recs_before = rc.session_records
+_state = {'killed': False}
+
+
+def _recs_after_kill(*a, **k):
+    return [] if killed else _recs_before()
+
+
+rc.session_records = _recs_after_kill
+rc.takeover(proj, 'live-idle')
+check(killed == [3] and calls[-1] == ('start', 'live-idle'), 'idle terminal killed then resumed same id')
+
+print('\n--- create_project ---')
+newp = rc.create_project(tmp, 'brandnew')
+check((newp / 'PROGRESS.md').exists(), 'PROGRESS.md written (so discovery lists it)')
+check((newp / '.git').is_dir(), 'git initialised')
+try:
+    rc.create_project(tmp, 'brandnew')
+    f('existing folder should raise')
+except rc.RCError as e:
+    check('already exists' in str(e), 'existing folder refused')
+
+print('\n--- registry ---')
+reg = tmp / 'reg.json'
+rc.registry_add('s1', 'C:/p/a', 'a', reg)
+rc.registry_add('s2', 'C:/p/b', 'b', reg)
+rc.registry_remove('s1', reg)
+check(list(rc.registry_entries(reg)) == ['s2'], 'add/remove')
+check(rc.registry_entries(tmp / 'none.json') == {}, 'missing registry -> empty')
 
 print('=' * 50)
 print(f'Results: {PASS} passed, {FAIL} failed')

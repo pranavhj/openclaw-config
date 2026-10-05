@@ -151,55 +151,173 @@ def _refresh_projects():
 
 
 # ---------------------------------------------------------------------------
-# Remote Control sessions (OC-041): "rc <project> new"
+# Remote Control sessions (OC-041): deterministic `rc` command, bypasses triage
 # ---------------------------------------------------------------------------
 
+import rc_commands
 import rc_sessions
+from project_list import FILTERED_ROOTS, UNFILTERED_ROOTS
 
-_RC_USAGE = ('Usage: `rc <project> new` — start a fresh Remote Control session in that project.\n'
-             '-# sent by claude')
-
-
-def _resolve_project(name: str) -> tuple[str | None, list[str]]:
-    """Exact (case-insensitive) project match -> (path, []); otherwise (None, candidates)."""
-    _refresh_projects()
-    key = name.lower()
-    if key in _known_projects:
-        return _known_projects[key], []
-    return None, sorted(n for n in _known_projects if key in n)[:10]
+_rc_pending: dict = {}  # channel_id -> pending question (rc_commands.new_pending)
 
 
-async def _handle_rc(message, content: str, sid: str):
-    parts = content.split()
-    if len(parts) != 3 or parts[2].lower() != 'new':
-        await message.reply(_RC_USAGE)
-        return
-    name = parts[1]
-    path, candidates = _resolve_project(name)
-    if not path:
-        hint = ('Did you mean: ' + ', '.join(f'`{c}`' for c in candidates)) if candidates else 'No match.'
-        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_project_unresolved',
-             'name': name, 'candidates': candidates})
-        await message.reply(f'Unknown project `{name}`. {hint}\n-# sent by claude')
-        return
-    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_start', 'project': path, 'mode': 'new'})
-    _log_human(f'[{sid}] RC start (new) in {path}')
-    status = await message.reply(f'⏳ Starting Remote Control in `{Path(path).name}`…')
+def _rc_roots() -> list[str]:
+    return [str(r) for r in FILTERED_ROOTS + UNFILTERED_ROOTS if r.exists()]
+
+
+async def _rc_run(message, sid: str, label: str, fn, *args):
+    """Run a blocking rc_sessions call in a thread with a status message; report errors.
+    Returns the call's result, or None on failure. RCLiveElsewhere propagates."""
+    status = await message.reply(f'⏳ {label}…')
+    t0 = time.monotonic()
     try:
-        res = await asyncio.to_thread(rc_sessions.start_rc, path, Path(path).name)
-    except rc_sessions.RCError as e:
-        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_start_failed', 'project': path,
-             'error': str(e)[:500]})
-        _log_human(f'[{sid}] RC start FAILED in {path}: {str(e)[:200]}')
-        log.error('[%s] rc start failed project=%s: %s', sid, path, e)
-        await status.edit(content=f'❌ Remote Control failed for `{Path(path).name}`:\n```\n{str(e)[:1500]}\n```')
+        res = await asyncio.to_thread(fn, *args)
+    except rc_sessions.RCLiveElsewhere:
+        await status.delete()
+        raise
+    except Exception as e:  # RCError, or anything unexpected: never leave the status stuck
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_failed', 'label': label,
+             'error_type': type(e).__name__, 'error': str(e)[:500]})
+        _log_human(f'[{sid}] RC FAILED ({label}): {str(e)[:200]}')
+        log.error('[%s] rc failed (%s): %s', sid, label, e,
+                  exc_info=not isinstance(e, rc_sessions.RCError))
+        await status.edit(content=f'❌ {label} failed:\n```\n{str(e)[:1500]}\n```')
+        return None
+    if isinstance(res, dict) and res.get('url'):
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_bridge_ready', 'label': label,
+             'job_id': res['job_id'], 'session_id': res['session_id'],
+             'bridge_session_id': res['bridge_session_id'], 'reused': res.get('reused', False),
+             'copied': res.get('copied', False), 'elapsed_ms': int((time.monotonic() - t0) * 1000)})
+        _log_human(f'[{sid}] RC ready ({label}): job={res["job_id"]} bridge={res["bridge_session_id"]}')
+        await status.edit(content=rc_commands.format_ready(res))
+    else:
+        await status.delete()
+    return res
+
+
+async def _rc_resume(message, sid: str, ch: str, path: str, session_id: str, allow_copy: bool = False):
+    name = Path(path).name
+    try:
+        await _rc_run(message, sid, f'Resuming `{session_id[:8]}` in `{name}`',
+                      rc_sessions.resume_rc, path, session_id, name, allow_copy)
+    except rc_sessions.RCLiveElsewhere as e:
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_live_elsewhere', 'project': path,
+             'session_id': session_id, 'status': e.status, 'pid': e.pid})
+        _rc_pending[ch] = rc_commands.new_pending('elsewhere', path=path, session_id=session_id)
+        await message.reply(rc_commands.format_live_elsewhere(name, e.status))
+
+
+async def _rc_start_fresh(message, sid: str, path: str):
+    name = Path(path).name
+    await _rc_run(message, sid, f'Starting a fresh Remote Control session in `{name}`',
+                  rc_sessions.start_rc, path, name)
+
+
+async def _rc_open(message, sid: str, ch: str, path: str, arg: str | None):
+    """`rc <project> [new|<n>]`: list conversations, or start/resume directly."""
+    if arg == 'new':
+        await _rc_start_fresh(message, sid, path)
         return
-    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_bridge_ready', 'project': path,
-         'job_id': res['job_id'], 'session_id': res['session_id'],
-         'bridge_session_id': res['bridge_session_id']})
-    _log_human(f'[{sid}] RC ready in {path}: job={res["job_id"]} bridge={res["bridge_session_id"]}')
-    await status.edit(content=f'✅ `{res["name"]}` is live on Remote Control\n{res["url"]}\n'
-                              f'-# job `{res["job_id"]}` · sent by claude')
+    convos = await asyncio.to_thread(rc_sessions.list_conversations, path)
+    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_conversations', 'project': path,
+         'count': len(convos), 'arg': arg})
+    if not convos:
+        await _rc_start_fresh(message, sid, path)
+        return
+    if arg is not None:
+        n = int(arg)
+        if n == 0:
+            await _rc_start_fresh(message, sid, path)
+        elif 1 <= n <= len(convos):
+            await _rc_resume(message, sid, ch, path, convos[n - 1]['session_id'])
+        else:
+            await message.reply(f'Pick 0–{len(convos)}.\n{rc_commands.FOOTER}')
+        return
+    live = await asyncio.to_thread(rc_sessions.live_in_dir, path)
+    live_rc = {r.get('sessionId') for r in live if r.get('bridgeSessionId')}
+    live_other = {r.get('sessionId') for r in live if not r.get('bridgeSessionId')}
+    _rc_pending[ch] = rc_commands.new_pending('convo', path=path,
+                                              convos=[c['session_id'] for c in convos])
+    await message.reply(rc_commands.format_conversations(Path(path).name, convos, live_rc, live_other))
+
+
+async def _rc_pick(message, sid: str, ch: str, n: int):
+    pend = _rc_pending.pop(ch)
+    if pend['kind'] == 'create':
+        roots = pend['roots']
+        if not 1 <= n <= len(roots):
+            _rc_pending[ch] = pend
+            await message.reply(f'Pick 1–{len(roots)}.\n{rc_commands.FOOTER}')
+            return
+
+        def _create_and_start():
+            global _projects_refreshed_at
+            path = rc_sessions.create_project(roots[n - 1], pend['name'])
+            _projects_refreshed_at = 0.0  # next message rescans so the new project is known
+            return rc_sessions.start_rc(path, pend['name'])
+
+        await _rc_run(message, sid, f'Creating `{pend["name"]}` in `{roots[n - 1]}`', _create_and_start)
+    elif pend['kind'] == 'convo':
+        ids = pend['convos']
+        if n == 0:
+            await _rc_start_fresh(message, sid, pend['path'])
+        elif 1 <= n <= len(ids):
+            await _rc_resume(message, sid, ch, pend['path'], ids[n - 1])
+        else:
+            _rc_pending[ch] = pend
+            await message.reply(f'Pick 0–{len(ids)}.\n{rc_commands.FOOTER}')
+    else:  # 'elsewhere' question pending: a number is not an answer, keep waiting
+        _rc_pending[ch] = pend
+        await message.reply(f'Reply `takeover` or `copy`, or ignore.\n{rc_commands.FOOTER}')
+
+
+async def _handle_rc(message, act: dict, sid: str):
+    ch = str(message.channel.id)
+    a = act['action']
+    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_command', 'action': a,
+         'project': act.get('project'), 'arg': act.get('arg'), 'n': act.get('n')})
+    _log_human(f'[{sid}] RC command: {a} {act.get("project") or act.get("name") or act.get("n") or ""}')
+
+    if a == 'help':
+        await message.reply(rc_commands.USAGE)
+    elif a == 'bad_name':
+        await message.reply(f'`{act["name"]}` isn’t a valid folder name '
+                            f'(letters, digits, `_ . -`).\n{rc_commands.FOOTER}')
+    elif a == 'list':
+        recs = await asyncio.to_thread(rc_sessions.session_records)
+        live = [dict(r, url=rc_sessions.rc_url(r)) for r in recs if r.get('bridgeSessionId')]
+        live_ids = {r.get('sessionId') for r in live}
+        dormant = [dict(v, session_id=k) for k, v in rc_sessions.registry_entries().items()
+                   if k not in live_ids]
+        await message.reply(rc_commands.format_list(live, dormant))
+    elif a == 'restore':
+        res = await _rc_run(message, sid, 'Restoring Remote Control sessions', rc_sessions.restore_all)
+        if res is not None:
+            await message.reply(rc_commands.format_restore(res))
+    elif a == 'create':
+        _rc_pending[ch] = rc_commands.new_pending('create', name=act['name'], roots=_rc_roots())
+        await message.reply(rc_commands.format_roots(act['name'], _rc_pending[ch]['roots']))
+    elif a in ('stop', 'open') and not act.get('path'):
+        await message.reply(rc_commands.format_candidates(act['name'], act['candidates']))
+    elif a == 'stop':
+        stopped = await asyncio.to_thread(rc_sessions.stop_rc_in_dir, act['path'])
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_stopped', 'project': act['path'],
+             'stopped': stopped})
+        msg = ('⏹ Stopped: ' + ', '.join(f'`{n}`' for n in stopped)) if stopped else \
+              'No Remote Control background sessions running there (terminal sessions are left alone).'
+        await message.reply(f'{msg}\n{rc_commands.FOOTER}')
+    elif a == 'open':
+        await _rc_open(message, sid, ch, act['path'], act['arg'])
+    elif a == 'pick':
+        await _rc_pick(message, sid, ch, act['n'])
+    elif a == 'copy':
+        pend = _rc_pending.pop(ch)
+        await _rc_resume(message, sid, ch, pend['path'], pend['session_id'], allow_copy=True)
+    elif a == 'takeover':
+        pend = _rc_pending.pop(ch)
+        _log_human(f'[{sid}] RC takeover of {pend["session_id"][:8]} in {pend["path"]}')
+        await _rc_run(message, sid, f'Taking over `{pend["session_id"][:8]}` in `{Path(pend["path"]).name}`',
+                      rc_sessions.takeover, pend['path'], pend['session_id'], Path(pend['path']).name)
 
 
 # Common words that should never trigger prefix matching against project names
@@ -881,9 +999,15 @@ async def on_message(message):
         return
 
     # Remote Control command (OC-041) — deterministic, bypasses triage
-    if content.strip().lower() == 'rc' or content.strip().lower().startswith('rc '):
-        await _handle_rc(message, content.strip(), sid)
+    _refresh_projects()
+    _rc_act = rc_commands.parse(content, _known_projects, _rc_pending.get(str(message.channel.id)))
+    if _rc_act:
+        await _handle_rc(message, _rc_act, sid)
         return
+    # "!" prefix: send through the Discord pipeline even if the project is live on RC
+    _force_discord = content.startswith('!')
+    if _force_discord:
+        content = content[1:].lstrip()
 
     env = None  # inherit environment; claude is already in PATH
 
@@ -974,6 +1098,17 @@ async def on_message(message):
                 _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'slug_continuity_fallback',
                      'slug': slug, 'elapsed_s': int(_elapsed), 'reason': reason})
                 _log_human(f'[{sid}] Continuity fallback ({reason}): slug={slug} ({int(_elapsed)}s ago)')
+
+    # OC-041 guard: project has a live Remote Control session -> point there instead of
+    # running a second writer (delegate --continue) on the same conversation folder.
+    if slug in _known_projects and not _force_discord:
+        _rc_live = rc_sessions.live_rc_in_dir(_known_projects[slug])
+        if _rc_live:
+            _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_guard_redirect', 'slug': slug,
+                 'session_id': _rc_live[0].get('sessionId')})
+            _log_human(f'[{sid}] RC guard: {slug} live on Remote Control, not delegating')
+            await message.reply(rc_commands.format_guard(slug, rc_sessions.rc_url(_rc_live[0])))
+            return
 
     # Check if this slug already has a running delegate
     if slug in _running_delegates:
