@@ -71,6 +71,17 @@ Fixes from the live run:
 - Conversation options passed to the router now say which are LIVE / open in a terminal.
 - Triage gateway still down: each message spends ~4s on a refused connection first.
 
+## Takeover test + background-service note (2026-10-05)
+- Live takeover via Discord: "ok" correctly refused (router-caused question is strict); "yes" closed
+  the terminal Claude and resumed the same conversation on Remote Control.
+- Fixed: takeover question stayed open after a non-consent reply (ed143d3); "ready" now requires a
+  live process, not a leftover session record (5ae2fac).
+- Claude Code auto-updated mid-test; its on-demand background service restarted repeatedly
+  ("binary changed") and lock-raced, killing the resumed session; new `--bg` starts failed for
+  ~10 min ("Couldn't reach the background service"), then recovered on their own.
+  Decision (user): keep auto-updates; after such an outage just wait a few minutes and reopen in
+  plain English ("bring everything back" / "open X on my phone"). No auto-restore watchdog.
+
 ## Files Changed
 - bin/rc_request.py (new), agents/remote-control.md (new), tests/test_rc_request.py (new)
 - bin/discord-bot.py, bin/delegate.py, bin/rc_commands.py, bin/run-tests.py
