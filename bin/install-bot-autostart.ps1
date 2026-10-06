@@ -20,6 +20,8 @@ not the Windows Hello PIN. A wrong/PIN password is what caused the NSSM logon fa
 #>
 param([switch]$Uninstall)
 
+$ErrorActionPreference = 'Stop'  # never continue past a failed step (2026-10-05: a failed
+                                 # registration went on to stop the running bot)
 $TaskName = 'OpenclawDiscordBot'
 $Wrapper  = 'D:\MyData\Software\openclaw-config\bin\run-bot.cmd'
 
@@ -32,8 +34,6 @@ if ($Uninstall) {
 if (-not (Test-Path $Wrapper)) { throw "Wrapper not found: $Wrapper" }
 
 $user = "$env:COMPUTERNAME\$env:USERNAME"
-$cred = Get-Credential -UserName $user -Message "Password for $user (Microsoft account password, NOT your PIN)"
-if (-not $cred) { throw 'No credentials entered' }
 
 $action   = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$Wrapper`"" -WorkingDirectory $env:USERPROFILE
 $trigger  = New-ScheduledTaskTrigger -AtStartup
@@ -42,9 +42,22 @@ $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) 
               -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
               -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-    -User $cred.UserName -Password $cred.GetNetworkCredential().Password -RunLevel Limited -Force | Out-Null
-Write-Host "Registered task $TaskName (runs at startup as $user)"
+$registered = $false
+for ($attempt = 1; $attempt -le 3 -and -not $registered; $attempt++) {
+    $cred = Get-Credential -UserName $user -Message "Attempt $attempt/3: password for $user (Microsoft account password, NOT your PIN)"
+    if (-not $cred) { throw 'No credentials entered - nothing was changed.' }
+    try {
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
+            -User $cred.UserName -Password $cred.GetNetworkCredential().Password -RunLevel Limited -Force | Out-Null
+        $registered = $true
+    } catch {
+        Write-Warning "Registration failed: $($_.Exception.Message)"
+    }
+}
+if (-not $registered) {
+    throw 'Could not register the task (wrong user name or password). Nothing else was changed; the running bot was not touched.'
+}
+Write-Host "Registered task $TaskName (runs at startup as $($cred.UserName))"
 
 # Retire the broken NSSM service so it can never start a second bot.
 sc.exe config discord-bot start= disabled | Out-Null
