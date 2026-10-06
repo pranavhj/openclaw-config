@@ -56,3 +56,34 @@ weaker at multi-step tool use. Would need the same rc.py + on-disk pending state
 - Latency: ~40s per spoken turn on the router; acceptable?
 - Should `rc` slug use a faster/cheaper model (haiku) for the router run?
 - Fix the llm-gateway outage separately (affects all triage today).
+
+## Adversarial review (2026-10-05) -- verdict: NOT ESTABLISHED
+1. HIGH: confirm tokens prove nothing -- the LLM gets the token in the same run and can pass it
+   back without asking; with bypassPermissions it can also call rc_sessions/taskkill directly.
+2. HIGH: keyword prefilter hijacks project work ("continue fixing the dairy tests") -- the router
+   prompt itself lists continue/resume as project work.
+3. HIGH: answers dropped while the `rc` slug is still busy ("Still working", no queue).
+4. MED: two pending stores (bot memory + disk) with no precedence; DM = one channel, so a "yes"
+   can confirm the wrong question.
+5. MED: topic switch captured by "pending -> rc" routing; no TTL on pending.
+6. MED: shell injection via argument values the router builds in bash.
+7. MED: ~40s per turn on the router.
+Facts spot-checked OK (6/6); "router has no memory" is questionable for a dedicated timeline.
+
+## Revised design (replaces the rc.py/token design above)
+The LLM only TRANSLATES natural language into an existing `rc ...` command string; the bot
+validates it with rc_commands.parse and executes it with the existing, tested handler.
+- Router: new intent "Remote Control" -> run `python bin/rc_request.py --channel <id> "<rc command>"`
+  (writes one JSON request file). The bot watches the request dir (like restart-bot.signal),
+  parses the command with rc_commands.parse (rejects anything else), executes via _handle_rc,
+  replies in the channel. No new execution code, no shell-built arguments beyond one string.
+- Consent stays with the user: requests from the LLM may NOT be `takeover`/`copy` (or `stop`);
+  those only act on the user's own literal reply to the bot's question.
+- Follow-ups: while the bot has an rc question pending, a non-number reply ("the login one")
+  goes to the router with the pending options injected into the prompt; the router answers with
+  `rc_request "rc dairy 2"` -- or, if the user switched topic, handles it as a normal request
+  (the router is the general handler, so topic switches are not captured). One pending store
+  (the bot's), with TTL and clear-on-new-question.
+- No keyword prefilter: the router decides; typed `rc ...` stays instant.
+- Later speed-up: once llm-gateway is running again, triage (haiku, ~9s, text-only) can emit a
+  third decision `RC <command>` through the same validated path; router remains the fallback.
