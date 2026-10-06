@@ -1157,6 +1157,10 @@ async def on_message(message):
     # or, if the user changed topic, the router just handles the new request.
     _rc_popped = _rc_pending.pop(str(message.channel.id), None)
     _rc_ctx = rc_commands.pending_context(_rc_popped)
+    if _rc_popped and _rc_popped.get('kind') == 'elsewhere' and _rc_ctx:
+        # Only the user's own "yes"/"takeover"/"copy" can answer a takeover question, so it
+        # stays open (until its TTL or the next rc command) while the router explains that.
+        _rc_pending[str(message.channel.id)] = _rc_popped
     if _rc_ctx and content.startswith('!'):
         _rc_ctx = ''  # "!" = explicit Discord pipeline; not an answer to the rc question
     if _rc_ctx:
