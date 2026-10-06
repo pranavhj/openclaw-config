@@ -236,9 +236,23 @@ async def _rc_open(message, sid: str, ch: str, path: str, arg: str | None):
     live = await asyncio.to_thread(rc_sessions.live_in_dir, path)
     live_rc = {r.get('sessionId') for r in live if r.get('bridgeSessionId')}
     live_other = {r.get('sessionId') for r in live if not r.get('bridgeSessionId')}
-    _rc_pending[ch] = rc_commands.new_pending('convo', path=path,
-                                              convos=[c['session_id'] for c in convos])
+    _rc_pending[ch] = rc_commands.new_pending(
+        'convo', path=path, project=Path(path).name.lower(),
+        convos=[c['session_id'] for c in convos],
+        labels=[f'{c["title"] or c["first_prompt"][:60] or "(untitled)"} '
+                f'({datetime.fromtimestamp(c["mtime"]):%b %d}, {c["user_turns"]} msgs, {c["source"]})'
+                for c in convos])
     await message.reply(rc_commands.format_conversations(Path(path).name, convos, live_rc, live_other))
+
+
+async def _rc_create(message, sid: str, root: str, name: str):
+    def _create_and_start():
+        global _projects_refreshed_at
+        path = rc_sessions.create_project(root, name)
+        _projects_refreshed_at = 0.0  # next message rescans so the new project is known
+        return rc_sessions.start_rc(path, name)
+
+    await _rc_run(message, sid, f'Creating `{name}` in `{root}`', _create_and_start)
 
 
 async def _rc_pick(message, sid: str, ch: str, n: int):
@@ -250,13 +264,7 @@ async def _rc_pick(message, sid: str, ch: str, n: int):
             await message.reply(f'Pick 1–{len(roots)}.\n{rc_commands.FOOTER}')
             return
 
-        def _create_and_start():
-            global _projects_refreshed_at
-            path = rc_sessions.create_project(roots[n - 1], pend['name'])
-            _projects_refreshed_at = 0.0  # next message rescans so the new project is known
-            return rc_sessions.start_rc(path, pend['name'])
-
-        await _rc_run(message, sid, f'Creating `{pend["name"]}` in `{roots[n - 1]}`', _create_and_start)
+        await _rc_create(message, sid, roots[n - 1], pend['name'])
     elif pend['kind'] == 'convo':
         ids = pend['convos']
         if n == 0:
@@ -312,9 +320,20 @@ async def _handle_rc_inner(message, act: dict, sid: str):
         if res is not None:
             await message.reply(rc_commands.format_restore(res))
     elif a == 'create':
-        _rc_pending[ch] = rc_commands.new_pending('create', name=act['name'], roots=_rc_roots())
-        await message.reply(rc_commands.format_roots(act['name'], _rc_pending[ch]['roots']))
+        roots = _rc_roots()
+        if act.get('root'):  # rc create <name> <root#>
+            if not 1 <= act['root'] <= len(roots):
+                await message.reply(rc_commands.format_roots(act['name'], roots))
+                _rc_pending[ch] = rc_commands.new_pending('create', name=act['name'], roots=roots)
+                return
+            await _rc_create(message, sid, roots[act['root'] - 1], act['name'])
+            return
+        _rc_pending[ch] = rc_commands.new_pending('create', name=act['name'], roots=roots)
+        await message.reply(rc_commands.format_roots(act['name'], roots))
     elif a in ('stop', 'open') and not act.get('path'):
+        if act['candidates']:  # so a plain-English answer ("the second one") gets context
+            _rc_pending[ch] = rc_commands.new_pending('candidates', name=act['name'],
+                                                      candidates=act['candidates'])
         await message.reply(rc_commands.format_candidates(act['name'], act['candidates']))
     elif a == 'stop':
         stopped = await asyncio.to_thread(rc_sessions.stop_rc_in_dir, act['path'])
@@ -931,6 +950,88 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
+RC_REQUEST_DIR = LOGDIR / 'rc-requests'
+_RC_REQUEST_MAX_AGE_S = 300
+_rc_watcher_started = False
+
+
+class _ChannelReplier:
+    """Minimal stand-in for a discord.Message so _handle_rc can answer router requests."""
+
+    def __init__(self, channel):
+        self.channel = channel
+
+    async def reply(self, text):
+        return await self.channel.send(text)
+
+
+async def _process_rc_request(req: dict):
+    """OC-043: run one rc command the router translated from natural language."""
+    sid = _new_session_id()
+    cmd = str(req.get('command', ''))[:200]
+    ch_id = str(req.get('channel', ''))
+    age = time.time() - float(req.get('ts', 0) or 0)
+    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_request_received', 'command': cmd,
+         'channel_id': ch_id, 'age_s': int(age), 'request_id': req.get('id')})
+    _log_human(f'[{sid}] RC request from router: {cmd!r}')
+
+    def _reject(reason: str):
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_request_rejected', 'command': cmd, 'reason': reason})
+        log.warning('[%s] rc request rejected (%s): %r', sid, reason, cmd)
+
+    if age > _RC_REQUEST_MAX_AGE_S:
+        _reject('stale')
+        return
+    try:
+        channel = client.get_channel(int(ch_id)) or await client.fetch_channel(int(ch_id))
+    except Exception as e:
+        _reject(f'channel: {e}')
+        return
+    recipient = getattr(channel, 'recipient', None)
+    if not isinstance(channel, discord.DMChannel) or (recipient and recipient.id != ALLOWED_USER):
+        _reject('not the allowed user DM')
+        return
+    global _projects_refreshed_at
+    _projects_refreshed_at = 0.0  # the router may have just created the project (android-new.sh)
+    _refresh_projects()
+    act = rc_commands.parse(cmd, _known_projects, None)
+    if not act:
+        _reject('not a valid rc command')
+        await channel.send(f'I tried `{cmd}` but that isn’t a valid rc command. '
+                           f'Send `rc` for the list.\n{rc_commands.FOOTER}')
+        return
+    if act['action'] in rc_commands.ROUTER_FORBIDDEN:
+        _reject(f'forbidden action {act["action"]}')
+        await channel.send(f'That needs your own answer — reply `yes`, `takeover` or `copy` '
+                           f'to the question above.\n{rc_commands.FOOTER}')
+        return
+    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_request_accepted', 'action': act['action']})
+    await _handle_rc(_ChannelReplier(channel), act, sid)
+
+
+async def watch_rc_requests():
+    """Pick up rc_request.py files (one JSON each) and run them in order."""
+    RC_REQUEST_DIR.mkdir(parents=True, exist_ok=True)
+    while True:
+        await asyncio.sleep(1)
+        for f in sorted(RC_REQUEST_DIR.glob('*.json')):
+            try:
+                req = json.loads(f.read_text(encoding='utf-8'))
+            except (OSError, json.JSONDecodeError) as e:
+                log.warning('rc request %s unreadable: %s', f.name, e)
+                req = None
+            try:
+                f.unlink()
+            except OSError as e:
+                log.warning('rc request %s could not be removed: %s', f.name, e)
+                continue  # don't run it again next poll
+            if isinstance(req, dict):
+                try:
+                    await _process_rc_request(req)
+                except Exception as e:
+                    log.error('rc request %s failed: %s', f.name, e, exc_info=True)
+
+
 RESTART_SIGNAL_FILE = LOGDIR / 'restart-bot.signal'
 
 
@@ -956,6 +1057,10 @@ async def on_ready():
     _log_human(f'Bot ready: {client.user} (id={client.user.id})')
     asyncio.create_task(watch_claude_sessions())
     asyncio.create_task(watch_restart_signal())
+    global _rc_watcher_started
+    if not _rc_watcher_started:  # on_ready fires again on reconnect; one watcher only
+        _rc_watcher_started = True
+        asyncio.create_task(watch_rc_requests())
     log.info('session watcher started')
 
 @client.event
@@ -1025,9 +1130,13 @@ async def on_message(message):
         await _handle_rc(message, _rc_act, sid)
         return
     # Any non-rc message closes an open rc question, so a later bare "2" meant for
-    # something else can never start a session.
-    if _rc_pending.pop(str(message.channel.id), None) is not None:
-        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_pending_cleared'})
+    # something else can never start a session. OC-043: the question is handed to the
+    # router once, so a plain-English answer ("the login one") can still be resolved —
+    # or, if the user changed topic, the router just handles the new request.
+    _rc_ctx = rc_commands.pending_context(_rc_pending.pop(str(message.channel.id), None))
+    if _rc_ctx:
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_pending_to_router', 'context_len': len(_rc_ctx)})
+        _log_human(f'[{sid}] RC question open — sending reply to router with context')
     # "!" prefix: send through the Discord pipeline even if the project is live on RC
     _force_discord = content.startswith('!')
     if _force_discord:
@@ -1057,7 +1166,7 @@ async def on_message(message):
     # Skip triage when attachments are present — always delegate (triage can't see files).
     decision = ''  # 'answer', 'delegate', 'error', or '' if triage skipped
     triage_slug = ''
-    if _gateway_token and not attach_count:
+    if _gateway_token and not attach_count and not _rc_ctx:
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'qa_triage_attempt',
              'msg_len': len(content), 'content_preview': content[:100]})
         _log_human(f'[{sid}] Q&A triage: asking gateway')
@@ -1098,7 +1207,8 @@ async def on_message(message):
     # Keyword match is most reliable when it fires (explicit project name in message).
     # Triage has context but can misidentify follow-ups; continuity catches the rest.
     _ch = str(message.channel.id)
-    keyword_slug = _match_project(content)
+    # OC-043: an answer to an open rc question always goes to the router (not a project)
+    keyword_slug = 'router' if _rc_ctx else _match_project(content)
     if keyword_slug != 'router':
         slug = keyword_slug
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'slug_from_keyword', 'slug': slug})
@@ -1113,7 +1223,7 @@ async def on_message(message):
         # Previously only activated on triage error — now handles all no-match cases so
         # follow-ups like "Yes go ahead" work even when triage can't identify the project.
         slug = 'router'
-        if _ch in _last_channel_slug:
+        if _ch in _last_channel_slug and not _rc_ctx:
             _last_slug, _last_mono = _last_channel_slug[_ch]
             _elapsed = time.monotonic() - _last_mono
             if _elapsed < 600 and _last_slug in _known_projects:
@@ -1137,6 +1247,16 @@ async def on_message(message):
             await message.reply(rc_commands.format_guard(slug, rc_sessions.rc_url(_rc_live[0])))
             return
 
+    # OC-043: an answer to an rc question must not be dropped just because the router run
+    # that asked it is still exiting — wait up to 60s for that run to finish.
+    if _rc_ctx and slug in _running_delegates:
+        for _ in range(30):
+            if not await asyncio.to_thread(_is_pid_alive, _running_delegates[slug]):
+                break
+            await asyncio.sleep(2)
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_wait_router',
+             'still_busy': await asyncio.to_thread(_is_pid_alive, _running_delegates[slug])})
+
     # Check if this slug already has a running delegate
     if slug in _running_delegates:
         old_pid = _running_delegates[slug]
@@ -1156,6 +1276,8 @@ async def on_message(message):
     try:
         if _force_discord:  # "!" prefix: let agent-smart's RC guard (OC-041) allow --continue
             env = {**(env or os.environ), 'OPENCLAW_FORCE_DISCORD': '1'}
+        if _rc_ctx:  # OC-043: delegate.py adds this to the router prompt
+            env = {**(env or os.environ), 'OPENCLAW_RC_PENDING': _rc_ctx}
         cmd = [sys.executable, str(DELEGATE_PY), 'discord', str(message.channel.id),
                '--slug', slug, content]
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'delegate_spawn',

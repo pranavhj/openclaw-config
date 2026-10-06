@@ -32,6 +32,7 @@ SUITES = [
     ('Nightly audit tests',   TESTS_DIR / 'test_nightly_audit.py'),
     ('RC session tests',      TESTS_DIR / 'test_rc_sessions.py'),
     ('RC command tests',      TESTS_DIR / 'test_rc_commands.py'),
+    ('RC request tests',      TESTS_DIR / 'test_rc_request.py'),
     ('Integration tests',     TESTS_DIR / 'test_integration.py'),
     ('Behavior tests',        TESTS_DIR / 'test_claude_behavior.py'),
 ]

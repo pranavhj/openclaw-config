@@ -414,6 +414,14 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
             f'Each entry is tagged [project]. Only use entries matching [openclaw] as context; ignore others.\n'
             f'{history}\n\n'
         )
+    rc_pending = os.environ.get('OPENCLAW_RC_PENDING', '')
+    if rc_pending:  # OC-043: the bot had a Remote Control question open when this arrived
+        prompt += ('## Pending Remote Control question (from the bot)\n'
+                   'The user may be answering this. If so, submit the full rc command via '
+                   'rc_request.py (see "Remote Control" in your instructions). If the request is '
+                   'about something else, ignore this section.\n'
+                   f'{rc_pending}\n\n')
+        tl({'ts': ts_ms(), 'event': 'rc_pending_injected', 'bytes': len(rc_pending)})
     prompt += f'## Request\n{message}\n'
 
     attachments_env = os.environ.get('DELEGATE_ATTACHMENTS', '')

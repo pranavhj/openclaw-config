@@ -28,6 +28,8 @@ PENDING_TTL_S = 600
 FOOTER = '-# sent by claude'
 NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$')
 RESERVED = {'list', 'stop', 'restore', 'new', 'create', 'help'}
+YES_RE = re.compile(r'^(y|yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|take ?over|take it over)\b[\s.!]*'
+                    r'(do it|go ahead|it|please|pls|now)?[\s.!]*$')
 
 USAGE = (
     '**Remote Control**\n'
@@ -47,8 +49,11 @@ def parse(content: str, known_projects: dict, pending: dict | None = None) -> di
     if pending and pending.get('expires', 0) > time.time():
         if re.fullmatch(r'[0-9]{1,2}', s) and pending.get('kind') in ('convo', 'create'):
             return {'action': 'pick', 'n': int(s)}
-        if low in ('copy', 'takeover') and pending.get('kind') == 'elsewhere':
-            return {'action': low}
+        if pending.get('kind') == 'elsewhere':
+            if low in ('copy', 'takeover'):
+                return {'action': low}
+            if YES_RE.match(low):  # the bot's question names takeover as the "yes" answer
+                return {'action': 'takeover'}
     parts = s.split()
     if not parts or parts[0].lower() != 'rc':
         return None
@@ -57,10 +62,14 @@ def parse(content: str, known_projects: dict, pending: dict | None = None) -> di
     sub = parts[1].lower()
     if len(parts) == 2 and sub in ('list', 'restore'):
         return {'action': sub}
-    if len(parts) == 3 and sub in ('create', 'new'):
+    if len(parts) in (3, 4) and sub in ('create', 'new'):
         name = parts[2]
         if not NAME_RE.match(name) or name.isdigit() or name.lower() in RESERVED:
             return {'action': 'bad_name', 'name': name}
+        if len(parts) == 4:  # rc create <name> <root#>: one step, no question needed
+            if not re.fullmatch(r'[0-9]{1,2}', parts[3]):
+                return None
+            return {'action': 'create', 'name': name, 'root': int(parts[3])}
         return {'action': 'create', 'name': name}
     if len(parts) == 3 and sub == 'stop':
         return {'action': 'stop', **_match(parts[2], known_projects)}
@@ -85,6 +94,39 @@ def _match(name: str, known_projects: dict) -> dict:
 
 def new_pending(kind: str, **data) -> dict:
     return {'kind': kind, 'expires': time.time() + PENDING_TTL_S, **data}
+
+
+# Actions an LLM-submitted request may not trigger: they need the user's own reply.
+ROUTER_FORBIDDEN = {'takeover', 'copy', 'pick'}
+
+
+def pending_context(pending: dict | None) -> str:
+    """Plain-text description of the bot's open question, injected into the router prompt
+    so a natural-language answer ("the login one") can be turned into a full rc command."""
+    if not pending or pending.get('expires', 0) <= time.time():
+        return ''
+    kind = pending.get('kind')
+    if kind == 'convo':
+        lines = [f'The bot listed conversations for project `{pending.get("project")}` and asked '
+                 f'which one to resume. Options:']
+        lines += [f'  {i}. {label}' for i, label in enumerate(pending.get('labels', []), 1)]
+        lines.append('  0. new conversation')
+        lines.append(f'Answer with: rc {pending.get("project")} <number>   (or rc {pending.get("project")} new)')
+        return '\n'.join(lines)
+    if kind == 'create':
+        lines = [f'The bot asked where to create new project `{pending.get("name")}`. Options:']
+        lines += [f'  {i}. {r}' for i, r in enumerate(pending.get('roots', []), 1)]
+        lines.append(f'Answer with: rc create {pending.get("name")} <number>')
+        return '\n'.join(lines)
+    if kind == 'candidates':
+        return (f'The bot could not find project `{pending.get("name")}` and offered: '
+                + ', '.join(pending.get('candidates', []))
+                + '. Answer with the full command using the right name, e.g. rc <project>.')
+    if kind == 'elsewhere':
+        return ('The bot asked whether to take over a conversation that is open in a terminal. '
+                'Only the user can answer that (by replying yes/takeover/copy). Do NOT submit '
+                'takeover or copy; if the user seems to agree, tell them to reply "yes".')
+    return ''
 
 
 def format_candidates(name: str, cands: list[str]) -> str:
@@ -139,7 +181,7 @@ def format_live_elsewhere(project: str, status: str | None) -> str:
     lines = [f'🔒 That conversation in `{project}` is open in a terminal without Remote '
              f'Control (status: `{status}`). Reply:']
     if idle:
-        lines.append('• `takeover` — close the Claude in that terminal and continue the '
+        lines.append('• `yes` (or `takeover`) — close the Claude in that terminal and continue the '
                      'same conversation on Remote Control (history kept)')
     else:
         lines.append('• `takeover` — only works once it is idle; it is busy now')

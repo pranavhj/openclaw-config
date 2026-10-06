@@ -81,6 +81,32 @@ check(rcc.parse('copy', KNOWN, PENDING_ELSEWHERE) == {'action': 'copy'}, 'copy a
 check(rcc.parse('Takeover', KNOWN, PENDING_ELSEWHERE) == {'action': 'takeover'}, 'takeover answers elsewhere')
 check(rcc.parse('rc list', KNOWN, PENDING_CONVO) == {'action': 'list'}, 'commands still work while pending')
 
+print('\n--- parse: natural-language support (OC-043) ---')
+check(rcc.parse('rc create step-counter 2', KNOWN) == {'action': 'create', 'name': 'step-counter', 'root': 2},
+      'rc create <name> <root#> in one step')
+check(rcc.parse('rc create step-counter android', KNOWN) is None, 'non-numeric root -> not ours')
+check(rcc.parse('yes', KNOWN, PENDING_ELSEWHERE) == {'action': 'takeover'}, 'yes answers takeover question')
+check(rcc.parse('Yeah do it', KNOWN, PENDING_ELSEWHERE) == {'action': 'takeover'}, 'yeah do it -> takeover')
+check(rcc.parse('yes please', KNOWN, PENDING_ELSEWHERE) == {'action': 'takeover'}, 'yes please -> takeover')
+check(rcc.parse('yes but first deploy shaadibot', KNOWN, PENDING_ELSEWHERE) is None,
+      'yes + other request is not a bare consent')
+check(rcc.parse('yes', KNOWN, PENDING_CONVO) is None, 'yes does not answer a conversation list')
+check(rcc.parse('yes', KNOWN, None) is None, 'yes without a question -> not ours')
+check(rcc.ROUTER_FORBIDDEN == {'takeover', 'copy', 'pick'}, 'router may not submit consent actions')
+
+PENDING_CONVO_LABELS = {'kind': 'convo', 'expires': time.time() + 60, 'project': 'dairy',
+                        'labels': ['Fix login bug (Oct 03, 18 msgs, terminal)', 'deploy the apk (Oct 02, 3 msgs, discord)']}
+ctx = rcc.pending_context(PENDING_CONVO_LABELS)
+check('1. Fix login bug' in ctx and '0. new conversation' in ctx, 'convo context lists numbered options')
+check('rc dairy <number>' in ctx, 'convo context tells the router the answer format')
+ctx = rcc.pending_context({'kind': 'create', 'expires': time.time() + 60, 'name': 'step-counter',
+                           'roots': ['C:\\p', 'C:\\a']})
+check('2. C:\\a' in ctx and 'rc create step-counter <number>' in ctx, 'create context lists roots')
+check('Do NOT submit' in rcc.pending_context(PENDING_ELSEWHERE), 'elsewhere context forbids consent')
+check(rcc.pending_context(PENDING_EXPIRED) == '', 'expired question -> no context')
+check(rcc.pending_context(None) == '', 'no question -> no context')
+check('`yes` (or `takeover`)' in rcc.format_live_elsewhere('dairy', 'idle'), 'question says yes works')
+
 print('\n--- format ---')
 convos = [
     {'session_id': 'a', 'mtime': 1790739806, 'title': 'Shaadi interface update', 'first_prompt': 'ok the',
@@ -96,7 +122,7 @@ check('**0.** \u2795 new conversation' in txt, 'option 0 = new')
 txt = rcc.format_conversations('shaadibot', convos, set(), {'b'})
 check('\U0001f512 open in a terminal' in txt, 'open-in-terminal marker')
 check(len(txt) < 2000, 'fits in one Discord message')
-check('`takeover` \u2014 close' in rcc.format_live_elsewhere('dairy', 'idle'), 'idle offers takeover')
+check('`takeover`) \u2014 close' in rcc.format_live_elsewhere('dairy', 'idle'), 'idle offers takeover')
 check('busy now' in rcc.format_live_elsewhere('dairy', 'busy'), 'busy explains takeover unavailable')
 check('**2.** `D:\\x`' in rcc.format_roots('myapp', ['C:\\p', 'D:\\x']), 'roots numbered from 1')
 ready = rcc.format_ready({'name': 'dairy', 'url': 'https://claude.ai/code/session_X', 'job_id': 'abcd1234'})

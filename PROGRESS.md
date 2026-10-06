@@ -1,7 +1,7 @@
 # openclaw-config
 
 ## State
-Currently: OC-041 `rc` live; OC-042 boot autostart ready — user must run bin/install-bot-autostart.ps1 as admin
+Currently: OC-043 natural-language Remote Control live (router -> rc_request -> bot); OC-042 boot task installed, reboot test pending
 Last session: 2026-06-22
 
 ## Done
