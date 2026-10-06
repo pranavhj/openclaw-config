@@ -1,6 +1,6 @@
-# Voice-driven Remote Control (OC-043 draft)
+# Natural-language Remote Control (OC-043 draft)
 
-Goal: the user speaks (voice -> text) into Discord, e.g. "open dairy on my phone",
+Goal: the user writes plain sentences in Discord instead of `rc` commands, e.g. "open dairy on my phone",
 "continue the one where I fixed login", "make a new android project called step counter".
 An LLM with an explicit capability prompt works out what to do, runs terminal commands,
 and asks a short question back when unclear. Typed `rc ...` commands stay as a fast path.
