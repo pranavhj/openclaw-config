@@ -1,7 +1,7 @@
 # openclaw-config
 
 ## State
-Currently: OC-041 Discord `rc` command (Remote Control launcher) built + tested; bot restart needed to activate
+Currently: OC-041 `rc` live; OC-042 boot autostart ready — user must run bin/install-bot-autostart.ps1 as admin
 Last session: 2026-06-22
 
 ## Done
@@ -17,7 +17,7 @@ Last session: 2026-06-22
 - 2026-10-05 OC-041: `rc` command — create/resume/takeover/list/stop/restore Remote Control sessions; delegate guard for RC-live projects
 
 ## Next
-- OC-027: NSSM service broken (logon failure) — bot runs manually for now
+- OC-042: run install-bot-autostart.ps1 (admin, Microsoft account password), then reboot-test
 - Check ISSUES.md for open issues before starting new work
 
 ## Key decisions

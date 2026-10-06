@@ -174,7 +174,7 @@ python D:\MyData\Software\openclaw-config\bin\trace-message.py "22:48" --date 20
 
 - **discord-send HTTP error** → check bot token in `C:\Users\prana\.openclaw\openclaw.json`; verify Message Content Intent enabled in Discord Developer Portal
 - **delegate lock stuck** → `rmdir %LOCALAPPDATA%\openclaw\delegate-{slug}.lock` to clear manually
-- **discord-bot.py not receiving messages** → `nssm status discord-bot`; verify Message Content Intent enabled
+- **discord-bot.py not receiving messages** → `schtasks /query /tn OpenclawDiscordBot` (boot task, OC-042) and tail `%LOCALAPPDATA%\openclaw\bot.log`; restart with `python D:\MyData\Software\openclaw-config\bin\restart-bot.py`; verify Message Content Intent enabled
 - **Empty message content** → Message Content Intent not enabled in Discord Developer Portal
 - **Wrong project context** → run `trace-message.py --last 5` to see slug matching decisions and continuity reuse
 

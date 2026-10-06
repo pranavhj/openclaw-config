@@ -44,3 +44,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-036](issues/OC-036-compact-command-smart-thresholds.md) | feature | fixed | agent-smart dual thresholds (warn 200KB, compact 1MB, default 5 pairs) + Discord compact command | `feat(OC-036)` |
 | [OC-037](issues/OC-037-misrouting-triage-error-continuity.md) | bug | fixed | Project misrouting when triage gateway errors: add continuity fallback + fix "screen" prefix false positive | `fix(OC-037)` |
 | [OC-041](issues/OC-041-remote-control-sessions.md) | feature | fixed | Start/resume Claude Remote Control sessions from Discord (`rc` command) | `feat(OC-041)` |
+| [OC-042](issues/OC-042-bot-boot-autostart.md) | config | open | Start Discord bot at boot without login (Task Scheduler + run-bot.cmd loop; replaces broken NSSM) | `config(OC-042)` |
