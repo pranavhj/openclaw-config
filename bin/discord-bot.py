@@ -203,7 +203,9 @@ async def _rc_resume(message, sid: str, ch: str, path: str, session_id: str, all
     except rc_sessions.RCLiveElsewhere as e:
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_live_elsewhere', 'project': path,
              'session_id': session_id, 'status': e.status, 'pid': e.pid})
-        _rc_pending[ch] = rc_commands.new_pending('elsewhere', path=path, session_id=session_id)
+        # strict: if the router's request caused this question, only a plain "yes" consents
+        _rc_pending[ch] = rc_commands.new_pending('elsewhere', path=path, session_id=session_id,
+                                                  strict=getattr(message, 'from_router', False))
         await message.reply(rc_commands.format_live_elsewhere(name, e.status))
 
 
@@ -301,7 +303,11 @@ async def _handle_rc_inner(message, act: dict, sid: str):
          'project': act.get('project'), 'arg': act.get('arg'), 'n': act.get('n')})
     _log_human(f'[{sid}] RC command: {a} {act.get("project") or act.get("name") or act.get("n") or ""}')
     if a not in ('pick', 'copy', 'takeover'):
-        _rc_pending.pop(ch, None)  # a new rc command supersedes any open question
+        # A new rc command supersedes any open question — except that a (possibly late) router
+        # request must not wipe a takeover question the user is answering.
+        if not (getattr(message, 'from_router', False)
+                and _rc_pending.get(ch, {}).get('kind') == 'elsewhere'):
+            _rc_pending.pop(ch, None)
 
     if a == 'help':
         await message.reply(rc_commands.USAGE)
@@ -332,7 +338,7 @@ async def _handle_rc_inner(message, act: dict, sid: str):
         await message.reply(rc_commands.format_roots(act['name'], roots))
     elif a in ('stop', 'open') and not act.get('path'):
         if act['candidates']:  # so a plain-English answer ("the second one") gets context
-            _rc_pending[ch] = rc_commands.new_pending('candidates', name=act['name'],
+            _rc_pending[ch] = rc_commands.new_pending('candidates', name=act['name'], action=a,
                                                       candidates=act['candidates'])
         await message.reply(rc_commands.format_candidates(act['name'], act['candidates']))
     elif a == 'stop':
@@ -953,10 +959,14 @@ client = discord.Client(intents=intents)
 RC_REQUEST_DIR = LOGDIR / 'rc-requests'
 _RC_REQUEST_MAX_AGE_S = 300
 _rc_watcher_started = False
+_RC_REQUEST_MAX_PER_MIN = 5
+_rc_request_times: collections.deque = collections.deque()
 
 
 class _ChannelReplier:
     """Minimal stand-in for a discord.Message so _handle_rc can answer router requests."""
+
+    from_router = True  # stricter consent + don't clobber the user's open question
 
     def __init__(self, channel):
         self.channel = channel
@@ -982,13 +992,23 @@ async def _process_rc_request(req: dict):
     if age > _RC_REQUEST_MAX_AGE_S:
         _reject('stale')
         return
+    if req.get('source') != 'router':
+        _reject('unknown source')
+        return
+    now = time.monotonic()
+    while _rc_request_times and now - _rc_request_times[0] > 60:
+        _rc_request_times.popleft()
+    if len(_rc_request_times) >= _RC_REQUEST_MAX_PER_MIN:  # a looping LLM can't flood actions
+        _reject('rate limit')
+        return
+    _rc_request_times.append(now)
     try:
         channel = client.get_channel(int(ch_id)) or await client.fetch_channel(int(ch_id))
     except Exception as e:
         _reject(f'channel: {e}')
         return
     recipient = getattr(channel, 'recipient', None)
-    if not isinstance(channel, discord.DMChannel) or (recipient and recipient.id != ALLOWED_USER):
+    if not isinstance(channel, discord.DMChannel) or not recipient or recipient.id != ALLOWED_USER:
         _reject('not the allowed user DM')
         return
     global _projects_refreshed_at
@@ -1133,7 +1153,17 @@ async def on_message(message):
     # something else can never start a session. OC-043: the question is handed to the
     # router once, so a plain-English answer ("the login one") can still be resolved —
     # or, if the user changed topic, the router just handles the new request.
-    _rc_ctx = rc_commands.pending_context(_rc_pending.pop(str(message.channel.id), None))
+    _rc_popped = _rc_pending.pop(str(message.channel.id), None)
+    _rc_ctx = rc_commands.pending_context(_rc_popped)
+    if _rc_ctx and content.startswith('!'):
+        _rc_ctx = ''  # "!" = explicit Discord pipeline; not an answer to the rc question
+    if _rc_ctx:
+        # Topic switch: the reply names a project unrelated to the question -> normal routing
+        _named = _match_project(content)
+        _related = {_rc_popped.get('project'), *(_rc_popped.get('candidates') or [])}
+        if _named != 'router' and _named not in _related:
+            _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_pending_topic_switch', 'slug': _named})
+            _rc_ctx = ''
     if _rc_ctx:
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_pending_to_router', 'context_len': len(_rc_ctx)})
         _log_human(f'[{sid}] RC question open — sending reply to router with context')
@@ -1265,6 +1295,8 @@ async def on_message(message):
                  'slug': slug, 'existing_pid': old_pid})
             _log_human(f'[{sid}] Slug {slug} busy (pid={old_pid})')
             log.info('[%s] slug=%s busy pid=%d', sid, slug, old_pid)
+            if _rc_ctx and _rc_popped:  # keep the rc question so the resend still has context
+                _rc_pending[str(message.channel.id)] = _rc_popped
             await message.reply(f'Still working on `{slug}` \u2014 please resend in a moment.')
             return
         else:

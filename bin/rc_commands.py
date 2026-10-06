@@ -52,7 +52,10 @@ def parse(content: str, known_projects: dict, pending: dict | None = None) -> di
         if pending.get('kind') == 'elsewhere':
             if low in ('copy', 'takeover'):
                 return {'action': low}
-            if YES_RE.match(low):  # the bot's question names takeover as the "yes" answer
+            # The bot's question names takeover as the "yes" answer. If the router (not the
+            # user's own rc command) caused the question, only an unmistakable "yes" counts —
+            # a stray "ok" meant for something else must not close a terminal.
+            if (low.rstrip('.!') == 'yes') if pending.get('strict') else YES_RE.match(low):
                 return {'action': 'takeover'}
     parts = s.split()
     if not parts or parts[0].lower() != 'rc':
@@ -119,9 +122,11 @@ def pending_context(pending: dict | None) -> str:
         lines.append(f'Answer with: rc create {pending.get("name")} <number>')
         return '\n'.join(lines)
     if kind == 'candidates':
-        return (f'The bot could not find project `{pending.get("name")}` and offered: '
+        verb = 'rc stop <project>' if pending.get('action') == 'stop' else 'rc <project>'
+        return (f'The user asked to {"stop" if pending.get("action") == "stop" else "open"} '
+                f'`{pending.get("name")}`, which matched several projects: '
                 + ', '.join(pending.get('candidates', []))
-                + '. Answer with the full command using the right name, e.g. rc <project>.')
+                + f'. Answer with: {verb} using the full project name.')
     if kind == 'elsewhere':
         return ('The bot asked whether to take over a conversation that is open in a terminal. '
                 'Only the user can answer that (by replying yes/takeover/copy). Do NOT submit '

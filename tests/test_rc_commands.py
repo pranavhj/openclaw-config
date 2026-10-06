@@ -107,6 +107,19 @@ check(rcc.pending_context(PENDING_EXPIRED) == '', 'expired question -> no contex
 check(rcc.pending_context(None) == '', 'no question -> no context')
 check('`yes` (or `takeover`)' in rcc.format_live_elsewhere('dairy', 'idle'), 'question says yes works')
 
+print('\n--- review round (OC-043) ---')
+PENDING_STRICT = dict(PENDING_ELSEWHERE, strict=True)
+check(rcc.parse('ok', KNOWN, PENDING_STRICT) is None, 'router-caused question: "ok" is not consent')
+check(rcc.parse('yeah do it', KNOWN, PENDING_STRICT) is None, 'router-caused question: "yeah do it" not consent')
+check(rcc.parse('Yes.', KNOWN, PENDING_STRICT) == {'action': 'takeover'}, 'router-caused question: plain yes works')
+check(rcc.parse('takeover', KNOWN, PENDING_STRICT) == {'action': 'takeover'}, 'router-caused question: takeover works')
+ctx = rcc.pending_context({'kind': 'candidates', 'expires': time.time() + 60, 'name': 'cricket',
+                           'action': 'stop', 'candidates': ['cricketapp', 'cricketapp2']})
+check('rc stop <project>' in ctx and 'stop' in ctx.split('`')[0], 'stop candidates keep the stop action')
+ctx = rcc.pending_context({'kind': 'candidates', 'expires': time.time() + 60, 'name': 'dai',
+                           'action': 'open', 'candidates': ['dairy']})
+check('Answer with: rc <project>' in ctx, 'open candidates answer with rc <project>')
+
 print('\n--- format ---')
 convos = [
     {'session_id': 'a', 'mtime': 1790739806, 'title': 'Shaadi interface update', 'first_prompt': 'ok the',

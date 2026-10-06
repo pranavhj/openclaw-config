@@ -41,6 +41,15 @@ The LLM only translates; the bot validates and executes with the tested OC-041 c
 - Real router eval (sonnet, real prompt, 10 sentences): 10/10 (one deferred an ambiguous
   "cricket" to the bot's candidate list, which is the intended behaviour); 11-44s per turn.
 
+## Review round (2026-10-05) -- SOUND WITH CAVEATS, fixes applied
+- Stop-candidates answer kept the stop action (pending stores `action`; context says rc stop).
+- Takeover question caused by a router request is `strict`: only a plain "yes"/"takeover" consents.
+- Topic switch: a reply naming an unrelated project drops the rc context and routes normally;
+  `!` replies ignore the rc question.
+- Router still busy after 60s: the rc question is restored so the resend keeps its context.
+- Requests: `source` must be router; max 5 per minute; DM recipient must be known.
+- A late router request no longer wipes an open takeover question.
+
 ## Files Changed
 - bin/rc_request.py (new), agents/remote-control.md (new), tests/test_rc_request.py (new)
 - bin/discord-bot.py, bin/delegate.py, bin/rc_commands.py, bin/run-tests.py
