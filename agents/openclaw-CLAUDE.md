@@ -12,7 +12,7 @@ You are Claude, invoked by the delegate script to handle a request from Discord.
 
 Send using:
 ```
-python D:\MyData\Software\openclaw-config\bin\discord-send.py --target $DISCORD_TARGET --message "<your response>"
+python /d/MyData/Software/openclaw-config/bin/discord-send.py --target $DISCORD_TARGET --message "<your response>"
 ```
 
 Do NOT return your response as stdout — it will NOT be forwarded. You own delivery.
@@ -86,10 +86,10 @@ New project — call directly (no sub-session needed):
 `bash /d/MyData/Software/openclaw-config/bin/android-new.sh --slug <slug> --dest /c/Users/prana/AndroidStudioProjects/<slug> [--app-tag <Tag>] [--github-repo pranavhj/<repo>]`
 Default dest: `C:\Users\prana\AndroidStudioProjects\<slug>` (Android projects go here, not `projects/`).
 Scaffolds project + generates CLAUDE.md + PROGRESS.md automatically. Read `D:\MyData\Software\openclaw-config\agents\android.md` for toolchain reference.
-After scaffolding succeeds, open it on Remote Control so the user can start working from the app: `python D:\MyData\Software\openclaw-config\bin\rc_request.py "rc <slug> new"`. Tell the user the project was created; the bot sends the link.
+After scaffolding succeeds, open it on Remote Control so the user can start working from the app: `python /d/MyData/Software/openclaw-config/bin/rc_request.py "rc <slug> new"`. Tell the user the project was created; the bot sends the link.
 
 **Remote Control** — the user wants to work on something from the phone / Claude app / claude.ai, mentions remote control, asks what sessions or conversations exist or are running, wants a session started/resumed/stopped/restored, wants a new project set up to work on remotely — or the prompt has a `## Pending Remote Control question`:
-- Read `D:\MyData\Software\openclaw-config\agents\remote-control.md` and follow it: translate the request into ONE `rc` command and submit it with `rc_request.py`. The bot runs it and replies. Do NOT spawn a sub-session or run claude yourself.
+- Read `D:/MyData/Software/openclaw-config/agents/remote-control.md` and follow it: translate the request into ONE `rc` command and submit it with `rc_request.py`. The bot runs it and replies. Do NOT spawn a sub-session or run claude yourself.
 - Plain coding requests ("continue fixing the dairy tests") are Project work, not Remote Control. If unclear, ask one short question.
 
 **Compact project session** — user says "compact <project>" or "compact <project> session" or "reset context <project>":
@@ -113,7 +113,7 @@ Target: <target>
 
 ## Communication
 Send all responses and questions to the user via:
-  python D:\MyData\Software\openclaw-config\bin\discord-send.py --target $DISCORD_TARGET --message \"<text>\"
+  python /d/MyData/Software/openclaw-config/bin/discord-send.py --target $DISCORD_TARGET --message \"<text>\"
 Then output: SENT
 
 If you need clarification before proceeding, send your question via discord-send.py, output SENT, and stop.
@@ -190,7 +190,7 @@ You are running inside a project directory. Your job is to do the work here — 
 2. Do the work (create/edit files in this directory)
 3. Update `PROGRESS.md` to reflect latest state
 4. Send response via discord-send.py — do NOT output as stdout:
-   `python D:\MyData\Software\openclaw-config\bin\discord-send.py --target $DISCORD_TARGET --message "<text>"`
+   `python /d/MyData/Software/openclaw-config/bin/discord-send.py --target $DISCORD_TARGET --message "<text>"`
    End every message with `-# sent by claude` watermark.
 5. Output: SENT
 

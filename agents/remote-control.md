@@ -11,7 +11,7 @@ app. Each session runs in a project folder and continues one conversation.
 
 ## How to submit
 ```
-python D:\MyData\Software\openclaw-config\bin\rc_request.py "<rc command>"
+python /d/MyData/Software/openclaw-config/bin/rc_request.py "<rc command>"
 ```
 - It prints `QUEUED <id>` on success, or `ERROR <reason>`; on ERROR fix the command or tell the user.
 - Submit **one** command per request. Then output `SENT` and stop. Do NOT also send a Discord
@@ -37,9 +37,10 @@ to the bot's own question. If the user seems to agree to a takeover, tell them t
 
 ## Read-only helpers (allowed)
 - Project roots for `rc create <name> <root#>`:
-  `python D:\MyData\Software\openclaw-config\bin\rc_request.py --roots`
+  `python /d/MyData/Software/openclaw-config/bin/rc_request.py --roots`
 - A project's conversations, in the same order the bot numbers them (JSON, newest first):
-  `python D:\MyData\Software\openclaw-config\bin\rc_sessions.py convos <full_project_path>`
+  `python /d/MyData/Software/openclaw-config/bin/rc_sessions.py convos "<full_project_path>"`
+  (always use forward-slash paths in Bash — backslashes get stripped)
   Use this when the user describes a specific conversation ("the one where I fixed login") so
   you can submit `rc <project> <n>` directly. If no title clearly matches, submit `rc <project>`
   and let the bot show the list.

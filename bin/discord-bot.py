@@ -242,7 +242,9 @@ async def _rc_open(message, sid: str, ch: str, path: str, arg: str | None):
         'convo', path=path, project=Path(path).name.lower(),
         convos=[c['session_id'] for c in convos],
         labels=[f'{c["title"] or c["first_prompt"][:60] or "(untitled)"} '
-                f'({datetime.fromtimestamp(c["mtime"]):%b %d}, {c["user_turns"]} msgs, {c["source"]})'
+                f'({datetime.fromtimestamp(c["mtime"]):%b %d}, {c["user_turns"]} msgs, {c["source"]}'
+                + (', LIVE on Remote Control' if c['session_id'] in live_rc else
+                   ', open in a terminal' if c['session_id'] in live_other else '') + ')'
                 for c in convos])
     await message.reply(rc_commands.format_conversations(Path(path).name, convos, live_rc, live_other))
 
@@ -1263,19 +1265,10 @@ async def on_message(message):
                      'slug': slug, 'elapsed_s': int(_elapsed), 'reason': reason})
                 _log_human(f'[{sid}] Continuity fallback ({reason}): slug={slug} ({int(_elapsed)}s ago)')
 
-    # OC-041 guard: project has a live Remote Control session -> point there instead of
-    # running a second writer (delegate --continue) on the same conversation folder.
-    # Only for explicitly identified projects (keyword/triage, not continuity guesses),
-    # and never when attachments were sent (they would be dropped).
-    _slug_explicit = keyword_slug != 'router' or slug == triage_slug
-    if slug in _known_projects and _slug_explicit and not attach_count and not _force_discord:
-        _rc_live = rc_sessions.live_rc_in_dir(_known_projects[slug])
-        if _rc_live:
-            _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_guard_redirect', 'slug': slug,
-                 'session_id': _rc_live[0].get('sessionId')})
-            _log_human(f'[{sid}] RC guard: {slug} live on Remote Control, not delegating')
-            await message.reply(rc_commands.format_guard(slug, rc_sessions.rc_url(_rc_live[0])))
-            return
+    # (OC-041's bot-level guard was removed in OC-043: it blocked every message naming an
+    # RC-live project, including "stop the dairy session". The real conflict — a second
+    # writer via --continue — is blocked in agent-smart.py, whose BLOCKED line the router
+    # forwards with the link.)
 
     # OC-043: an answer to an rc question must not be dropped just because the router run
     # that asked it is still exiting — wait up to 60s for that run to finish.

@@ -50,6 +50,27 @@ The LLM only translates; the bot validates and executes with the tested OC-041 c
 - Requests: `source` must be router; max 5 per minute; DM recipient must be known.
 - A late router request no longer wipes an open takeover question.
 
+## Live Discord round-trip (2026-10-05, driven through the Discord desktop app)
+| # | Sent | Result |
+|---|------|--------|
+| 1 | "open shaadibot so I can continue on my phone" | rc shaadibot -> conversation list (15s) |
+| 2 | "the first one" | context -> router -> rc shaadibot 1 -> resumed, link (26s) |
+| - | clicked the link | claude.ai/code opened that conversation: URL format CONFIRMED |
+| 3 | "what's running on remote control right now?" | rc list (16s) |
+| 4 | "shut down the shaadibot remote session" | FAILED first: bot guard swallowed it -> guard removed -> rc stop shaadibot, stopped (16s) |
+| 5 | "set up a new python project called rcnltest so I can work on it from the app" | rc create rcnltest 3 -> created + live (19s); cleaned up after |
+| 6 | "open dairy so I can continue on my phone" / "the one that's already live" | list, then rc dairy 1 -> reused live link, nothing started |
+| 7 | rc shaadibot, then "what is 2 plus 2?" | topic switch: router answered "4", no rc request |
+| 8 | "show me my remote sessions" | rc list (10s) |
+
+Fixes from the live run:
+- Removed OC-041's bot-level guard (blocked every message naming an RC-live project, e.g. stop);
+  the agent-smart.py --continue guard still prevents the real two-writer conflict.
+- Router prompts use forward-slash paths (bash stripped backslashes -> every rc_request and
+  discord-send call retried once).
+- Conversation options passed to the router now say which are LIVE / open in a terminal.
+- Triage gateway still down: each message spends ~4s on a refused connection first.
+
 ## Files Changed
 - bin/rc_request.py (new), agents/remote-control.md (new), tests/test_rc_request.py (new)
 - bin/discord-bot.py, bin/delegate.py, bin/rc_commands.py, bin/run-tests.py
