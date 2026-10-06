@@ -298,11 +298,11 @@ def session_records(sessions_dir: Path = SESSIONS_DIR, alive_only: bool = True) 
 
 
 def find_session(job_id: str, sessions_dir: Path = SESSIONS_DIR) -> dict | None:
-    """Return the ~/.claude/sessions/*.json record for a background job id."""
-    for rec in session_records(sessions_dir, alive_only=False):
-        if rec.get('jobId') == job_id:
-            return rec
-    return None
+    """Return the ~/.claude/sessions/*.json record for a background job id, preferring the
+    record of a live process (a dead one with the same id may still be on disk)."""
+    matches = [r for r in session_records(sessions_dir, alive_only=False) if r.get('jobId') == job_id]
+    live = [r for r in matches if record_is_live(r)]
+    return (live or matches or [None])[0]
 
 
 def _same_dir(a: str | Path, b: str | Path) -> bool:
@@ -336,11 +336,13 @@ def bg_session_ids() -> set[str]:
 
 def wait_for_bridge(job_id: str, timeout_s: float = 30, poll_s: float = 1,
                     sessions_dir: Path = SESSIONS_DIR) -> dict | None:
-    """Poll until the session record has a bridgeSessionId. Returns the record or None."""
+    """Poll until a LIVE session record has a bridgeSessionId. Returns the record or None.
+    A dead process can leave its record (with bridgeSessionId) behind; accepting it reported
+    "ready" for a session that was not running (found in the OC-043 live test)."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         rec = find_session(job_id, sessions_dir)
-        if rec and rec.get('bridgeSessionId'):
+        if rec and rec.get('bridgeSessionId') and record_is_live(rec):
             return rec
         time.sleep(poll_s)
     return None

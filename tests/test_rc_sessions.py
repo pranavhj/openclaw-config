@@ -76,12 +76,25 @@ sdir = tmp / 'sessions'
 sdir.mkdir()
 (sdir / '1.json').write_text(json.dumps({'jobId': 'aaaa1111', 'sessionId': 's1'}), encoding='utf-8')
 (sdir / '2.json').write_text('{not json', encoding='utf-8')
-(sdir / '3.json').write_text(json.dumps({'jobId': 'bbbb2222', 'sessionId': 's3',
+_me = os.getpid()
+_me_start = rc.proc_start_time(_me)
+(sdir / '3.json').write_text(json.dumps({'jobId': 'bbbb2222', 'sessionId': 's3', 'pid': _me,
+                                         'procStart': str(_me_start),
                                          'bridgeSessionId': 'session_XYZ'}), encoding='utf-8')
+# dead process left its record behind (same job id, bridge id set) -- must never count as ready
+(sdir / '4.json').write_text(json.dumps({'jobId': 'cccc3333', 'sessionId': 's4', 'pid': _me,
+                                         'procStart': str(_me_start + 1),
+                                         'bridgeSessionId': 'session_OLD'}), encoding='utf-8')
 check(rc.find_session('aaaa1111', sdir)['sessionId'] == 's1', 'finds by jobId, skips corrupt file')
 check(rc.find_session('nope', sdir) is None, 'unknown job -> None')
-check(rc.wait_for_bridge('bbbb2222', 2, 0.1, sdir)['bridgeSessionId'] == 'session_XYZ', 'bridge ready')
+check(rc.wait_for_bridge('bbbb2222', 2, 0.1, sdir)['bridgeSessionId'] == 'session_XYZ', 'live bridge ready')
 check(rc.wait_for_bridge('aaaa1111', 0.5, 0.1, sdir) is None, 'no bridge -> None after timeout')
+check(rc.wait_for_bridge('cccc3333', 0.5, 0.1, sdir) is None, 'dead record with bridge id -> not ready')
+(sdir / '5.json').write_text(json.dumps({'jobId': 'cccc3333', 'sessionId': 's4', 'pid': _me,
+                                         'procStart': str(_me_start),
+                                         'bridgeSessionId': 'session_NEW'}), encoding='utf-8')
+check(rc.wait_for_bridge('cccc3333', 2, 0.1, sdir)['bridgeSessionId'] == 'session_NEW',
+      'dead + live record for same job -> the live one wins')
 
 print('\n--- start_rc errors ---')
 try:
