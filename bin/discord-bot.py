@@ -935,7 +935,7 @@ RESTART_SIGNAL_FILE = LOGDIR / 'restart-bot.signal'
 
 
 async def watch_restart_signal():
-    """Exit cleanly when restart-bot.py drops a signal file. NSSM auto-restarts the app."""
+    """Exit cleanly when restart-bot.py drops a signal file. run-bot.cmd (OC-042) restarts it."""
     while True:
         await asyncio.sleep(2)
         if RESTART_SIGNAL_FILE.exists():
@@ -944,8 +944,8 @@ async def watch_restart_signal():
             except Exception:
                 pass
             _tl({'ts': _ts_iso(), 'event': 'restart_signal_received'})
-            _log_human('Restart signal received — exiting for NSSM restart')
-            log.info('restart signal received — exiting for NSSM restart')
+            _log_human('Restart signal received — exiting for run-bot.cmd restart')
+            log.info('restart signal received — exiting for run-bot.cmd restart')
             os._exit(0)
 
 

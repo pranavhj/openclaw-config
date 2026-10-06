@@ -29,8 +29,16 @@ error 1069 (most likely cause of OC-027 -- not confirmed).
 Verified (2026-10-05, without the task): run-bot.cmd started via WMI ran the bot; restart-bot.py
 ended it and the loop restarted it (ready after 19s). The task itself needs the admin step.
 
+## Installed (2026-10-05)
+- First attempt failed with 0x8007052E (wrong password) and the script continued, stopping the
+  running bot; fixed: `$ErrorActionPreference='Stop'` + 3 password attempts before any change.
+- Second attempt succeeded: task runs as PRANAVHP\prana (LogonType Password); bot runs in
+  session 0 and connected; NSSM service discord-bot is Disabled.
+- restart-bot.py now uses the bot's restart-bot.signal file (works across sessions; a
+  non-admin process cannot see session-0 command lines). Verified: exit 0 -> run-bot.cmd
+  restart -> ready after 19s.
+
 ## Pending
-- User runs `install-bot-autostart.ps1` as administrator with the Microsoft account password.
 - Reboot test: bot ready in bot.log without logging in.
 
 ## Files Changed

@@ -60,15 +60,29 @@ def ready_since(offset: int) -> bool:
         return False
 
 
+SIGNAL = LOGDIR / 'restart-bot.signal'  # discord-bot.py exits cleanly when this appears
+
+
 def main():
     offset = log_size()
-    pids = bot_pids()
     running = task_running()
-    print(f'task {TASK}: {"running" if running else "not running"}; bot pids: {pids or "none"}')
+    pids = bot_pids()  # only sees processes in this logon session (task bot runs in session 0)
+    print(f'task {TASK}: {"running" if running else "not running"}; visible bot pids: {pids or "none"}')
 
-    for pid in pids:
-        subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
-        print(f'  stopped bot pid {pid}')
+    # Primary path: ask the bot to exit (works across sessions); run-bot.cmd restarts it.
+    if running or pids:
+        SIGNAL.write_text('1', encoding='utf-8')
+        print('  restart signal written')
+        for _ in range(10):
+            time.sleep(1)
+            if not SIGNAL.exists():
+                print('  bot picked up the signal and exited')
+                break
+        else:
+            SIGNAL.unlink(missing_ok=True)
+            for pid in pids:  # bot did not respond: force-stop the ones we can see
+                subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
+                print(f'  force-stopped bot pid {pid}')
 
     if not pids and not running:  # nothing to restart in place: start the task
         r = subprocess.run(['schtasks', '/run', '/tn', TASK], capture_output=True, text=True)
