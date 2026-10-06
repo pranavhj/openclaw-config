@@ -234,6 +234,66 @@ check(rc2.record_is_live({'pid': me, 'procStart': str(real_start)}), 'matching p
 check(not rc2.record_is_live({'pid': me, 'procStart': str(real_start + 1)}), 'reused pid (procStart mismatch) -> not live')
 check(not rc2.record_is_live({'pid': 0}), 'no pid -> not live')
 
+print('\n--- terminal_rc_in_dir / close_terminal (OC-044) ---')
+_saved = {n: getattr(rc2, n) for n in ('session_records', 'kill_pid', 'record_is_live', 'registry_remove')}
+term_recs = [
+    {'pid': 11, 'procStart': '100', 'sessionId': 's-idle', 'name': 'harden', 'kind': 'interactive',
+     'status': 'idle', 'cwd': str(proj), 'bridgeSessionId': 'session_A'},
+    {'pid': 12, 'procStart': '200', 'sessionId': 's-busy', 'name': 'hung', 'kind': 'interactive',
+     'status': 'busy', 'cwd': str(proj), 'bridgeSessionId': 'session_B'},
+    {'pid': 13, 'procStart': '300', 'sessionId': 's-bg', 'name': 'bgone', 'kind': 'bg',
+     'status': 'idle', 'cwd': str(proj), 'bridgeSessionId': 'session_C', 'jobId': 'bg000000'},
+    {'pid': 14, 'procStart': '400', 'sessionId': 's-norc', 'name': 'norc', 'kind': 'interactive',
+     'status': 'idle', 'cwd': str(proj)},
+]
+rc2.session_records = lambda *a, **k: [dict(r) for r in term_recs]
+rc2.record_is_live = lambda rec: True
+killed2, removed2 = [], []
+rc2.kill_pid = lambda pid, *a, **k: killed2.append(pid) or True
+rc2.registry_remove = lambda sid, *a, **k: removed2.append(sid)
+check([r['name'] for r in rc2.terminal_rc_in_dir(proj)] == ['harden', 'hung'],
+      'only terminal sessions with RC on are listed (bg and non-RC excluded)')
+check(rc2.close_terminal({'pid': 11, 'procStart': '100', 'sessionId': 's-idle', 'name': 'harden'}) == 'harden'
+      and killed2 == [11] and removed2 == ['s-idle'], 'idle terminal closed')
+try:
+    rc2.close_terminal({'pid': 12, 'procStart': '200', 'sessionId': 's-busy', 'name': 'hung'})
+    f('busy terminal must not be closed without force')
+except rc2.RCError as e:
+    check('not idle' in str(e) and killed2 == [11], 'busy terminal refused without force')
+check(rc2.close_terminal({'pid': 12, 'procStart': '200', 'sessionId': 's-busy', 'name': 'hung'}, force=True) == 'hung'
+      and killed2 == [11, 12], 'force kills a busy (hung) terminal')
+try:
+    rc2.close_terminal({'pid': 11, 'procStart': '999', 'sessionId': 's-idle', 'name': 'harden'}, force=True)
+    f('different process (procStart changed) must not be killed')
+except rc2.RCError as e:
+    check('different process' in str(e) and killed2 == [11, 12], 'procStart mismatch refused even with force')
+try:
+    rc2.close_terminal({'pid': 99, 'procStart': '1', 'sessionId': 'gone', 'name': 'gone'}, force=True)
+    f('missing session must raise')
+except rc2.RCError as e:
+    check('no longer running' in str(e), 'session that already exited reported')
+try:
+    rc2.close_terminal({'pid': 11, 'procStart': None, 'sessionId': 's-idle', 'name': 'harden'})
+    f('target without procStart must not be killed')
+except rc2.RCError as e:
+    check('no process start time' in str(e) and killed2 == [11, 12], 'missing procStart refused')
+killed2.clear()
+term_recs[1]['status'] = 'busy'
+res = rc2.close_terminals([{'pid': 11, 'procStart': '100', 'sessionId': 's-idle', 'name': 'harden', 'status': 'busy'},
+                           {'pid': 12, 'procStart': '200', 'sessionId': 's-busy', 'name': 'hung', 'status': 'idle'}])
+check(res['closed'] == ['harden'] and killed2 == [11], 'close_terminals uses live status, not the snapshot')
+check([t['pid'] for t in res['busy']] == [12] and res['failed'] == [], 'busy target kept (by identity) for force')
+res = rc2.close_terminals(res['busy'], force=True)
+check(res['closed'] == ['hung'] and killed2 == [11, 12], 'force on the leftover kills only the busy one')
+rc2.record_is_live = lambda rec: False
+try:
+    rc2.close_terminal({'pid': 11, 'procStart': '100', 'sessionId': 's-idle', 'name': 'harden'})
+    f('identity recheck failure must not kill')
+except rc2.RCError as e:
+    check('changed while' in str(e) and killed2 == [11, 12], 'identity re-check before kill')
+for _n, _v in _saved.items():
+    setattr(rc2, _n, _v)
+
 print('\n--- create_project ---')
 newp = rc.create_project(tmp, 'brandnew')
 check((newp / 'PROGRESS.md').exists(), 'PROGRESS.md written (so discovery lists it)')

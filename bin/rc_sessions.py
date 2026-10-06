@@ -661,6 +661,58 @@ def stop_rc_in_dir(project_path: str | Path) -> list[str]:
     return stopped
 
 
+def terminal_rc_in_dir(project_path: str | Path, sessions_dir: Path = SESSIONS_DIR) -> list[dict]:
+    """Live terminal (interactive) sessions in this folder with Remote Control on — the ones
+    `stop_rc_in_dir` leaves alone. Closing them needs the user's explicit consent."""
+    return [r for r in live_rc_in_dir(project_path, sessions_dir) if r.get('kind') == 'interactive']
+
+
+def close_terminal(target: dict, force: bool = False, sessions_dir: Path = SESSIONS_DIR) -> str:
+    """End the terminal claude process described by `target` ({pid, procStart, sessionId}).
+    Without `force` it only closes an idle session, so no turn is cut off; `force` kills it
+    whatever its status (for a hung session). The record is re-read and the process
+    identity re-checked right before the kill. Returns the session name."""
+    pid = target.get('pid')
+    recs = [r for r in session_records(sessions_dir)
+            if r.get('pid') == pid and r.get('sessionId') == target.get('sessionId')]
+    name = target.get('name') or str(pid)
+    if not recs:
+        raise RCError(f'`{name}` is no longer running.')
+    rec = recs[0]
+    if target.get('procStart') is None or rec.get('procStart') is None:
+        raise RCError(f'`{name}` has no process start time, so I can’t confirm it is the '
+                      f'right process — not closing it.')
+    if rec.get('procStart') != target['procStart']:
+        raise RCError(f'`{name}` is a different process now — not closing it.')
+    status = rec.get('status')
+    if not force and status != 'idle':
+        raise RCError(f'`{name}` is `{status}`, not idle — not interrupting it.')
+    if not record_is_live(rec):  # re-check identity right before killing
+        raise RCError(f'`{name}` changed while preparing to close it — try again.')
+    log.warning('close_terminal: ending terminal claude pid=%s session=%s status=%s force=%s',
+                pid, rec.get('sessionId'), status, force)
+    if not kill_pid(pid):
+        raise RCError(f'could not end terminal process {pid}')
+    registry_remove(rec.get('sessionId', ''))
+    return rec.get('name') or name
+
+
+def close_terminals(targets: list[dict], force: bool = False) -> dict:
+    """Close each target terminal session (see close_terminal). Status is re-checked at
+    close time, not taken from when the question was asked. Returns {closed, failed,
+    busy}: `busy` holds the targets left open because they were not idle (force=False)."""
+    closed, failed, busy = [], [], []
+    for t in targets:
+        try:
+            closed.append(close_terminal(t, force))
+        except RCError as e:
+            if not force and 'not idle' in str(e):
+                busy.append(t)
+            else:
+                failed.append(str(e))
+    return {'closed': closed, 'failed': failed, 'busy': busy}
+
+
 def restore_all(timeout_s: float = 30) -> list[dict]:
     """Bring back every registry session that is no longer live (e.g. after a reboot)."""
     live_ids = {r.get('sessionId') for r in session_records()}

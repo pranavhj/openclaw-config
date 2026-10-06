@@ -30,6 +30,10 @@ NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$')
 RESERVED = {'list', 'stop', 'restore', 'new', 'create', 'help'}
 YES_RE = re.compile(r'^(y|yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|take ?over|take it over)\b[\s.!]*'
                     r'(do it|go ahead|it|please|pls|now)?[\s.!]*$')
+CLOSE_YES_RE = re.compile(r'^(y|yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|close( it)?)\b[\s,.!]*'
+                          r'(do it|go ahead|close it|kill it|please|pls|now)?[\s.!]*$')
+CLOSE_STRICT_RE = re.compile(r'^yes[\s,.!]*(close it|kill it|please)?[\s.!]*$')
+FORCE_RE = re.compile(r'^(force|force (kill|close)( it)?|kill it anyway|force kill it)[\s.!]*$')
 
 USAGE = (
     '**Remote Control**\n'
@@ -57,6 +61,13 @@ def parse(content: str, known_projects: dict, pending: dict | None = None) -> di
             # a stray "ok" meant for something else must not close a terminal.
             if (low.rstrip('.!') == 'yes') if pending.get('strict') else YES_RE.match(low):
                 return {'action': 'takeover'}
+        if pending.get('kind') == 'close':
+            # Closing a terminal session: only the user's own reply counts (the router may
+            # not submit close/force_close). `force` kills even a busy (possibly hung) one.
+            if FORCE_RE.match(low):
+                return {'action': 'force_close'}
+            if CLOSE_STRICT_RE.match(low) if pending.get('strict') else CLOSE_YES_RE.match(low):
+                return {'action': 'close'}
     parts = s.split()
     if not parts or parts[0].lower() != 'rc':
         return None
@@ -100,7 +111,7 @@ def new_pending(kind: str, **data) -> dict:
 
 
 # Actions an LLM-submitted request may not trigger: they need the user's own reply.
-ROUTER_FORBIDDEN = {'takeover', 'copy', 'pick'}
+ROUTER_FORBIDDEN = {'takeover', 'copy', 'pick', 'close', 'force_close'}
 
 
 def pending_context(pending: dict | None) -> str:
@@ -131,7 +142,54 @@ def pending_context(pending: dict | None) -> str:
         return ('The bot asked whether to take over a conversation that is open in a terminal. '
                 'Only the user can answer that (by replying yes/takeover/copy). Do NOT submit '
                 'takeover or copy; if the user seems to agree, tell them to reply "yes".')
+    if kind == 'close':
+        return ('The bot asked whether to close Claude terminal session(s) in project '
+                f'`{pending.get("project")}` that have Remote Control on: '
+                + ', '.join(t.get('name') or '?' for t in pending.get('targets', []))
+                + '. That question is now cancelled (the user replied with something else). '
+                f'If the user is agreeing to close them, submit `rc stop {pending.get("project")}` '
+                'so the bot asks again, and tell them to reply "yes" (or "force" if it is busy '
+                'and hung). Never submit yes/force/close yourself. If they changed topic, '
+                'ignore this.')
     return ''
+
+
+def format_close_question(project: str, stopped: list[str], targets: list[dict]) -> str:
+    """Ask before closing terminal sessions with Remote Control on (OC-044)."""
+    lines = []
+    if stopped:
+        lines.append('⏹ Stopped background: ' + ', '.join(f'`{n}`' for n in stopped))
+    idle = [t for t in targets if t.get('status') == 'idle']
+    busy = [t for t in targets if t.get('status') != 'idle']
+    lines.append(f'\U0001f5a5 Terminal session(s) in `{project}` with Remote Control on:')
+    for t in targets:
+        lines.append(f'• `{t.get("name") or t.get("pid")}` — {t.get("status")}')
+    if idle:
+        lines.append('Reply `yes` to close ' + ('them' if len(idle) > 1 else 'it')
+                     + ' (the conversation is kept; reopen it any time).')
+    if busy:
+        names = ', '.join(f'`{t.get("name") or t.get("pid")}`' for t in busy)
+        one = len(busy) == 1
+        lines.append(f'⚠️ {names} {"is" if one else "are"} busy, so I won’t close '
+                     f'{"it" if one else "them"} normally. If it looks hung, reply '
+                     f'`force` to kill it anyway (the turn in progress is lost).')
+    lines.append(FOOTER)
+    return '\n'.join(lines)
+
+
+def format_close_result(closed: list[str], failed: list[str], left_busy: list[str]) -> str:
+    lines = []
+    if closed:
+        lines.append('⏹ Closed: ' + ', '.join(f'`{n}`' for n in closed)
+                     + ' — the conversation is saved; reopen it any time.')
+    lines += [f'❌ {f}' for f in failed]
+    if left_busy:
+        lines.append(f'Still busy, not closed: {", ".join(f"`{n}`" for n in left_busy)}. '
+                     f'Reply `force` to kill anyway.')
+    if not lines:
+        lines.append('Nothing to close.')
+    lines.append(FOOTER)
+    return '\n'.join(lines)
 
 
 def format_candidates(name: str, cands: list[str]) -> str:

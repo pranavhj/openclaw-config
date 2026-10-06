@@ -16,6 +16,8 @@ Last session: 2026-06-22
 - OC-037: Project misrouting fix — continuity fallback when triage errors, "screen" prefix blocklist
 - 2026-10-05 OC-041: `rc` command — create/resume/takeover/list/stop/restore Remote Control sessions; delegate guard for RC-live projects
 
+- 2026-10-06 OC-044: rc stop closes terminal RC sessions (user yes; force for hung), triage gateway now started by boot task — live-tested
+
 ## Next
 - OC-042: run install-bot-autostart.ps1 (admin, Microsoft account password), then reboot-test
 - Check ISSUES.md for open issues before starting new work

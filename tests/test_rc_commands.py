@@ -92,7 +92,7 @@ check(rcc.parse('yes but first deploy shaadibot', KNOWN, PENDING_ELSEWHERE) is N
       'yes + other request is not a bare consent')
 check(rcc.parse('yes', KNOWN, PENDING_CONVO) is None, 'yes does not answer a conversation list')
 check(rcc.parse('yes', KNOWN, None) is None, 'yes without a question -> not ours')
-check(rcc.ROUTER_FORBIDDEN == {'takeover', 'copy', 'pick'}, 'router may not submit consent actions')
+check(rcc.ROUTER_FORBIDDEN == {'takeover', 'copy', 'pick', 'close', 'force_close'}, 'router may not submit consent actions')
 
 PENDING_CONVO_LABELS = {'kind': 'convo', 'expires': time.time() + 60, 'project': 'dairy',
                         'labels': ['Fix login bug (Oct 03, 18 msgs, terminal)', 'deploy the apk (Oct 02, 3 msgs, discord)']}
@@ -144,6 +144,37 @@ check('copy' in rcc.format_ready({'name': 'd', 'url': 'u', 'job_id': 'j', 'copie
 check('already live' in rcc.format_ready({'name': 'd', 'url': 'u', 'job_id': 'j', 'reused': True}), 'reuse noted')
 check('rc stop dairy' in rcc.format_guard('dairy', 'u'), 'guard explains how to stop')
 check('Nothing to restore' in rcc.format_restore([]), 'empty restore')
+
+print('\n--- close terminal question (OC-044) ---')
+PENDING_CLOSE = {'kind': 'close', 'expires': time.time() + 60, 'path': 'C:/p/dairy',
+                 'project': 'dairy', 'targets': [{'pid': 1, 'name': 'harden', 'status': 'idle'}]}
+PENDING_CLOSE_STRICT = dict(PENDING_CLOSE, strict=True)
+for s in ('yes', 'Yes!', 'ok', 'yeah close it', 'close it', 'go ahead'):
+    check((rcc.parse(s, KNOWN, PENDING_CLOSE) or {}).get('action') == 'close', f'close: {s!r}')
+for s in ('force', 'Force kill', 'force close it', 'kill it anyway'):
+    check((rcc.parse(s, KNOWN, PENDING_CLOSE) or {}).get('action') == 'force_close', f'force: {s!r}')
+check((rcc.parse('yes', KNOWN, PENDING_CLOSE_STRICT) or {}).get('action') == 'close', 'strict: plain yes closes')
+check((rcc.parse('yes, close it', KNOWN, PENDING_CLOSE_STRICT) or {}).get('action') == 'close', 'strict: yes, close it')
+check(rcc.parse('ok', KNOWN, PENDING_CLOSE_STRICT) is None, 'strict: stray ok does not close')
+check(rcc.parse('force', KNOWN, PENDING_CLOSE_STRICT)['action'] == 'force_close', 'strict: force still works')
+check(rcc.parse('yes', KNOWN, None) is None, 'yes with no question is not a command')
+check(rcc.parse('force', KNOWN, PENDING_ELSEWHERE) is None, 'force does not answer a takeover question')
+check(rcc.parse('yes please fix the bug', KNOWN, PENDING_CLOSE) is None, 'longer sentence is not consent')
+check(rcc.parse('1', KNOWN, PENDING_CLOSE) is None, 'a number does not answer a close question')
+check({'close', 'force_close'} <= rcc.ROUTER_FORBIDDEN, 'router cannot submit close/force_close')
+ctx = rcc.pending_context(PENDING_CLOSE)
+check('harden' in ctx and 'Never submit' in ctx and 'rc stop dairy' in ctx, 'router context: cancelled, re-submit rc stop, never answer')
+q = rcc.format_close_question('claudeInfra', [], [{'name': 'harden', 'status': 'idle'}])
+check('Reply `yes`' in q and 'force' not in q, 'idle-only question offers yes, not force')
+q = rcc.format_close_question('claudeInfra', ['bg1'], [{'name': 'harden', 'status': 'idle'},
+                                                       {'name': 'hung', 'status': 'busy'}])
+check('`bg1`' in q and 'Reply `yes`' in q and '`hung`' in q and 'reply `force`' in q,
+      'mixed question: stopped bg listed, yes for idle, force offered for busy')
+q = rcc.format_close_question('x', [], [{'name': 'hung', 'status': 'busy'}])
+check('Reply `yes`' not in q and 'won’t close' in q, 'busy-only: refused, force offered')
+r = rcc.format_close_result(['harden'], [], ['hung'])
+check('Closed: `harden`' in r and 'Reply `force`' in r, 'result lists closed and still-busy')
+check(len(q) < 2000, 'fits in one Discord message')
 
 print('=' * 50)
 print(f'Results: {PASS} passed, {FAIL} failed')

@@ -7,6 +7,9 @@ set "LOGDIR=%LOCALAPPDATA%\openclaw"
 set "LOG=%LOGDIR%\bot.log"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 
+rem start the triage gateway (OC-044) unless something already listens on its port
+netstat -ano | findstr /r /c:":18789 .*LISTENING" > nul || start "llm-gateway" /b cmd /c "D:\MyData\Software\openclaw-config\bin\run-gateway.cmd"
+
 :loop
 rem rotate bot.log at ~5 MB
 for %%F in ("%LOG%") do if %%~zF GTR 5000000 move /y "%LOG%" "%LOG%.1" > nul

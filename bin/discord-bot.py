@@ -278,9 +278,10 @@ async def _rc_pick(message, sid: str, ch: str, n: int):
         else:
             _rc_pending[ch] = pend
             await message.reply(f'Pick 0–{len(ids)}.\n{rc_commands.FOOTER}')
-    else:  # 'elsewhere' question pending: a number is not an answer, keep waiting
+    else:  # 'elsewhere'/'close' question pending: a number is not an answer, keep waiting
         _rc_pending[ch] = pend
-        await message.reply(f'Reply `takeover` or `copy`, or ignore.\n{rc_commands.FOOTER}')
+        hint = '`yes` or `force`' if pend['kind'] == 'close' else '`takeover` or `copy`'
+        await message.reply(f'Reply {hint}, or ignore.\n{rc_commands.FOOTER}')
 
 
 async def _handle_rc(message, act: dict, sid: str):
@@ -304,11 +305,11 @@ async def _handle_rc_inner(message, act: dict, sid: str):
     _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_command', 'action': a,
          'project': act.get('project'), 'arg': act.get('arg'), 'n': act.get('n')})
     _log_human(f'[{sid}] RC command: {a} {act.get("project") or act.get("name") or act.get("n") or ""}')
-    if a not in ('pick', 'copy', 'takeover'):
+    if a not in ('pick', 'copy', 'takeover', 'close', 'force_close'):
         # A new rc command supersedes any open question — except that a (possibly late) router
-        # request must not wipe a takeover question the user is answering.
+        # request must not wipe a takeover/close question the user is answering.
         if not (getattr(message, 'from_router', False)
-                and _rc_pending.get(ch, {}).get('kind') == 'elsewhere'):
+                and _rc_pending.get(ch, {}).get('kind') in ('elsewhere', 'close')):
             _rc_pending.pop(ch, None)
 
     if a == 'help':
@@ -345,11 +346,33 @@ async def _handle_rc_inner(message, act: dict, sid: str):
         await message.reply(rc_commands.format_candidates(act['name'], act['candidates']))
     elif a == 'stop':
         stopped = await asyncio.to_thread(rc_sessions.stop_rc_in_dir, act['path'])
+        terms = await asyncio.to_thread(rc_sessions.terminal_rc_in_dir, act['path'])
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_stopped', 'project': act['path'],
-             'stopped': stopped})
+             'stopped': stopped, 'terminals': [(t.get('name'), t.get('status')) for t in terms]})
+        if terms:  # OC-044: terminal sessions are closed only on the user's own yes/force
+            targets = [{k: t.get(k) for k in ('pid', 'procStart', 'sessionId', 'name', 'status')}
+                       for t in terms]
+            _rc_pending[ch] = rc_commands.new_pending('close', path=act['path'], project=act['project'],
+                                                      targets=targets,
+                                                      strict=getattr(message, 'from_router', False))
+            await message.reply(rc_commands.format_close_question(Path(act['path']).name, stopped, targets))
+            return
         msg = ('⏹ Stopped: ' + ', '.join(f'`{n}`' for n in stopped)) if stopped else \
-              'No Remote Control background sessions running there (terminal sessions are left alone).'
+              'No Remote Control sessions running there.'
         await message.reply(f'{msg}\n{rc_commands.FOOTER}')
+    elif a in ('close', 'force_close'):
+        pend = _rc_pending.pop(ch)
+        force = a == 'force_close'
+        _log_human(f'[{sid}] RC close terminals in {pend["path"]} force={force}: '
+                   + ', '.join(f'{t.get("name")} pid={t.get("pid")}' for t in pend['targets']))
+        res = await asyncio.to_thread(rc_sessions.close_terminals, pend['targets'], force)
+        left_busy = [t.get('name') or str(t.get('pid')) for t in res['busy']]
+        _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_close_terminal', 'project': pend['path'],
+             'force': force, 'closed': res['closed'], 'failed': res['failed'], 'left_busy': left_busy})
+        if res['busy']:  # keep the question open (same identities) so `force` still works
+            _rc_pending[ch] = rc_commands.new_pending('close', path=pend['path'], project=pend.get('project'),
+                                                      strict=pend.get('strict', False), targets=res['busy'])
+        await message.reply(rc_commands.format_close_result(res['closed'], res['failed'], left_busy))
     elif a == 'open':
         await _rc_open(message, sid, ch, act['path'], act['arg'])
     elif a == 'pick':
@@ -1157,6 +1180,9 @@ async def on_message(message):
     # or, if the user changed topic, the router just handles the new request.
     _rc_popped = _rc_pending.pop(str(message.channel.id), None)
     _rc_ctx = rc_commands.pending_context(_rc_popped)
+    # A close question (OC-044) is NOT kept open: any other message cancels it, so a stray
+    # "ok" meant for something later can never close a terminal. If the message was a
+    # plain-English yes, the router re-submits `rc stop` and the bot asks again.
     if _rc_popped and _rc_popped.get('kind') == 'elsewhere' and _rc_ctx:
         # Only the user's own "yes"/"takeover"/"copy" can answer a takeover question, so it
         # stays open (until its TTL or the next rc command) while the router explains that.

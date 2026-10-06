@@ -28,11 +28,11 @@ python /d/MyData/Software/openclaw-config/bin/rc_request.py "<rc command>"
 | `rc create <name>` | New project folder; the bot asks the user where. |
 | `rc create <name> <root#>` | New project folder in root #n (see roots below), no question. |
 | `rc list` | Live Remote Control sessions with links. |
-| `rc stop <project>` | Stops Remote Control sessions the bot started there. |
+| `rc stop <project>` | Stops Remote Control sessions the bot started there. If Claude terminal sessions there have Remote Control on, the bot asks the user whether to close them (`yes`; `force` for a busy/hung one). |
 | `rc restore` | Brings back bot-started sessions (e.g. after a reboot). |
 
 **Never submit** `takeover`, `copy` or a bare number — those are answers only the user can give
-to the bot's own question. If the user seems to agree to a takeover, tell them to reply `yes`.
+to the bot's own question. If the user seems to agree to a takeover, tell them to reply `yes`. The same goes for closing a terminal session: never submit `yes`/`force`. If the pending section says a close question was cancelled and the user is agreeing, submit `rc stop <project>` again so the bot re-asks, and tell them to reply `yes` (or `force` if it is hung).
 **Never run** `claude`, `taskkill`, `rc_sessions.py start/...`, or edit `~/.claude.json`.
 
 ## Read-only helpers (allowed)
