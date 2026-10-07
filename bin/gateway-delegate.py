@@ -271,6 +271,8 @@ def main():
     parser.add_argument('--context', default='auto', choices=['auto', 'none'],
                         help='Whether to load project data into prompt')
     parser.add_argument('--sid', default='?', help='Session ID from gateway')
+    parser.add_argument('--fresh', action='store_true',
+                        help='Start a new conversation instead of --continue (stateless callers)')
     parser.add_argument('slug', help='Project slug')
     parser.add_argument('message', nargs='+', help='Message text')
     args = parser.parse_args()
@@ -314,13 +316,13 @@ def main():
     t_mono = time.monotonic()
 
     _tl({'ts': _ts_iso(), 'sid': _SID, 'event': 'agent_spawn',
-         'project': slug, 'model': 'haiku', 'cwd': str(work_dir)})
+         'project': slug, 'model': 'haiku', 'cwd': str(work_dir), 'fresh': args.fresh})
     _log_stderr(f'spawning agent-smart.py (model=haiku, cwd={work_dir})')
 
     try:
         proc = subprocess.run(
             [sys.executable, str(AGENT_SMART_PY),
-             '--continue',
+             *([] if args.fresh else ['--continue']),
              '--permission-mode', 'bypassPermissions',
              '--model', 'haiku',
              '--print-file', str(prompt_file)],

@@ -219,10 +219,11 @@ async def handle_ask(request: web.Request):
         )
 
     context = body.get('context', 'auto')  # "auto" or "none"
+    fresh = body.get('fresh') is True  # JSON true only ("false" strings stay off); True = new conversation, no --continue (stateless callers)
 
     client = request.remote or '?'
     _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'ask_received',
-         'project': project, 'context': context, 'client': client,
+         'project': project, 'context': context, 'fresh': fresh, 'client': client,
          'msg_len': len(message), 'msg_preview': message[:120]})
     _log_human(f'[{sid}] ASK from={client} project={project} context={context} msg={message[:100]}')
     log.info('[%s] ask: client=%s project=%s context=%s msg=%s', sid, client, project, context, message[:80])
@@ -279,7 +280,7 @@ async def handle_ask(request: web.Request):
 
             # Run gateway-delegate in a thread (it's blocking subprocess work)
             response_text = await asyncio.get_event_loop().run_in_executor(
-                None, _run_delegate, project, message, context, sid,
+                None, _run_delegate, project, message, context, sid, fresh,
             )
 
             duration_ms = int((time.monotonic() - t0) * 1000)
@@ -499,16 +500,18 @@ async def handle_projects_create(request: web.Request):
 # Delegate runner (blocking — called via run_in_executor)
 # ---------------------------------------------------------------------------
 
-def _run_delegate(project: str, message: str, context: str = 'auto', sid: str = '?') -> str:
+def _run_delegate(project: str, message: str, context: str = 'auto', sid: str = '?',
+                  fresh: bool = False) -> str:
     """Spawn gateway-delegate.py and capture Claude's response."""
     import subprocess
 
     _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'delegate_subprocess_start',
-         'project': project, 'context': context, 'pid': os.getpid()})
+         'project': project, 'context': context, 'fresh': fresh, 'pid': os.getpid()})
 
     t0 = time.monotonic()
     result = subprocess.run(
-        [sys.executable, str(GATEWAY_DELEGATE_PY), '--context', context, '--sid', sid, project, message],
+        [sys.executable, str(GATEWAY_DELEGATE_PY), '--context', context, '--sid', sid]
+        + (['--fresh'] if fresh else []) + [project, message],
         capture_output=True,
         text=True,
         encoding='utf-8',
