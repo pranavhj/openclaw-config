@@ -39,6 +39,7 @@ curl -X POST -H "Authorization: Bearer TOKEN" -H "Content-Type: application/json
 | `project` | yes | Project slug (e.g. `"dairy"`) |
 | `message` | yes | Question or request text |
 | `context` | no | `"auto"` (default) = load stored data into prompt. `"none"` = skip data, for simple questions like "what is HTTP?" |
+| `fresh` | no | `false` (default) = resume the project's conversation (`claude --continue`). `true` = new conversation each call — for stateless callers (e.g. per-item scoring) so earlier requests cannot leak into the answer. |
 
 **Error responses:**
 
