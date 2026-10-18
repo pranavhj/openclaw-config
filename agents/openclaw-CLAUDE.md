@@ -55,7 +55,7 @@ Your prompt includes a `## Known projects` section. Use it to decide how to hand
 **One-off** (questions, quick fixes, analysis, explanations — completable in one shot):
 - Answer directly from your own built-in training knowledge. Send response to Discord. Output: SENT.
 - **Do NOT use any tools except discord-send.py.** No WebSearch, no WebFetch, no LLM gateway, no Anthropic API, no sub-sessions, no file reads.
-- **If the message is a question** (starts with: what, why, how, when, where, who, can, does, is, are, should, did, has, have — or ends with `?`), ALWAYS treat as one-off and answer directly from built-in training knowledge, even if a known project is mentioned. Only exception: questions about Remote Control sessions/conversations ("what's running on remote control?", "which dairy conversations do I have?") — those follow **Remote Control** below. Do not attempt to look anything up — you already know it.
+- **If the message is a question** (starts with: what, why, how, when, where, who, can, does, is, are, should, did, has, have — or ends with `?`), ALWAYS treat as one-off and answer directly from built-in training knowledge, even if a known project is mentioned. Only exception: questions about Remote Control sessions/conversations ("what's running on remote control?", "which dairy conversations do I have?") and about the Gemini/ChatGPT gateways ("is the gemini gateway running?") — those follow **Remote Control** below. Do not attempt to look anything up — you already know it.
 
 **Tool invoke** (project has a `## Quick invoke` section in its CLAUDE.md):
 - Read the project's CLAUDE.md first (`<full_path>\CLAUDE.md`).
@@ -88,7 +88,7 @@ Default dest: `C:\Users\prana\AndroidStudioProjects\<slug>` (Android projects go
 Scaffolds project + generates CLAUDE.md + PROGRESS.md automatically. Read `D:\MyData\Software\openclaw-config\agents\android.md` for toolchain reference.
 After scaffolding succeeds, open it on Remote Control so the user can start working from the app: `python /d/MyData/Software/openclaw-config/bin/rc_request.py "rc <slug> new"`. Tell the user the project was created; the bot sends the link.
 
-**Remote Control** — the user wants to work on something from the phone / Claude app / claude.ai, mentions remote control, asks what sessions or conversations exist or are running, wants a session started/resumed/stopped/restored, wants a new project set up to work on remotely — or the prompt has a `## Pending Remote Control question`:
+**Remote Control** — the user wants to work on something from the phone / Claude app / claude.ai, mentions remote control, asks what sessions or conversations exist or are running, wants a session started/resumed/stopped/restored, wants a new project set up to work on remotely, wants the Gemini or ChatGPT gateway started or checked ("please start the Gemini gateway", "is the chatgpt gateway up?") — or the prompt has a `## Pending Remote Control question`:
 - Read `D:/MyData/Software/openclaw-config/agents/remote-control.md` and follow it: translate the request into ONE `rc` command and submit it with `rc_request.py`. The bot runs it and replies. Do NOT spawn a sub-session or run claude yourself.
 - Plain coding requests ("continue fixing the dairy tests") are Project work, not Remote Control. If unclear, ask one short question.
 
