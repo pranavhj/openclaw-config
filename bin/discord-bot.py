@@ -155,6 +155,7 @@ def _refresh_projects():
 # ---------------------------------------------------------------------------
 
 import rc_commands
+import rc_gateways
 import rc_sessions
 from project_list import FILTERED_ROOTS, UNFILTERED_ROOTS
 
@@ -193,6 +194,27 @@ async def _rc_run(message, sid: str, label: str, fn, *args):
     else:
         await status.delete()
     return res
+
+
+async def _rc_gateway(message, sid: str, act: dict):
+    key, verb = act['gateway'], act['verb']
+    if verb == 'status':
+        st = await asyncio.to_thread(rc_gateways.status)
+        keys = [key] if key else list(st)
+        lines = [f'{"🟢" if st[k] else "⚪"} `{k}` gateway (port {rc_gateways.GATEWAYS[k]["port"]}): '
+                 f'{"up" if st[k] else "not running"}' for k in keys]
+        await message.reply('\n'.join(lines) + f'\n{rc_commands.FOOTER}')
+        return
+    res = await _rc_run(message, sid, f'Starting {key} gateway', rc_gateways.start, key)
+    if res is None:
+        return
+    _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'gateway_start', 'gateway': key, **res})
+    _log_human(f'[{sid}] gateway {key}: {res}')
+    port = res['port']
+    msg = {'already_up': f'🟢 `{key}` gateway is already running on port {port}.',
+           'started': f'✅ `{key}` gateway started on port {port} (pid {res.get("pid")}).',
+           'failed': f'❌ `{key}` gateway failed to start: {res.get("detail")}'}[res['state']]
+    await message.reply(f'{msg}\n{rc_commands.FOOTER}')
 
 
 async def _rc_resume(message, sid: str, ch: str, path: str, session_id: str, allow_copy: bool = False):
@@ -324,6 +346,8 @@ async def _handle_rc_inner(message, act: dict, sid: str):
         dormant = [dict(v, session_id=k) for k, v in rc_sessions.registry_entries().items()
                    if k not in live_ids]
         await message.reply(rc_commands.format_list(live, dormant))
+    elif a == 'gateway':
+        await _rc_gateway(message, sid, act)
     elif a == 'restore':
         res = await _rc_run(message, sid, 'Restoring Remote Control sessions', rc_sessions.restore_all)
         if res is not None:

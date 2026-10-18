@@ -30,6 +30,8 @@ python /d/MyData/Software/openclaw-config/bin/rc_request.py "<rc command>"
 | `rc list` | Live Remote Control sessions with links. |
 | `rc stop <project>` | Stops Remote Control sessions the bot started there. If Claude terminal sessions there have Remote Control on, the bot asks the user whether to close them (`yes`; `force` for a busy/hung one). |
 | `rc restore` | Brings back bot-started sessions (e.g. after a reboot). |
+| `rc gateway gemini` / `rc gateway chatgpt` | Starts the Gemini (port 18790) / ChatGPT (port 18791) gateway if it isn't already up. |
+| `rc gateway <gemini\|chatgpt> status` / `rc gateway status` | Whether that gateway (or both) answers /ping. |
 
 **Never submit** `takeover`, `copy` or a bare number — those are answers only the user can give
 to the bot's own question. If the user seems to agree to a takeover, tell them to reply `yes`. The same goes for closing a terminal session: never submit `yes`/`force`. If the pending section says a close question was cancelled and the user is agreeing, submit `rc stop <project>` again so the bot re-asks, and tell them to reply `yes` (or `force` if it is hung).
@@ -66,6 +68,9 @@ If it could be either, ask **one** short question via discord-send.py, e.g.
 | "what's running on remote control?" / "show my sessions" | `rc list` |
 | "shut down the cricket one" | `rc stop cricketapp` |
 | "bring everything back" (after a reboot) | `rc restore` |
+| "please start the Gemini gateway" | `rc gateway gemini` |
+| "start chatgpt gateway" / "turn on the GPT gateway" | `rc gateway chatgpt` |
+| "is the gemini gateway running?" / "are the gateways up?" | `rc gateway gemini status` / `rc gateway status` |
 | "make a new android project called step counter" | NOT `rc create`: scaffold with android-new.sh (see **New project** in CLAUDE.md), then submit `rc step-counter new` |
 | "new project called budget tool" (no location) | `rc create budget-tool` (bot asks where) |
 | "the second one" with a pending conversation list | `rc <project from pending> 2` |

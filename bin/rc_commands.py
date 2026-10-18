@@ -12,6 +12,8 @@ Commands:
     rc <project> new             fresh conversation
     rc stop <project>            stop Remote Control background sessions there
     rc restore                   bring back bot-started sessions (after reboot)
+    rc gateway <gemini|chatgpt> [start|status]   start a gateway / check it
+    rc gateway status            status of both gateways
     <n> | copy | takeover        answer a pending question (10 min window)
 
 Anything else starting with "rc " that does not name a project falls through to normal
@@ -24,10 +26,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import rc_gateways
+
 PENDING_TTL_S = 600
 FOOTER = '-# sent by claude'
 NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$')
-RESERVED = {'list', 'stop', 'restore', 'new', 'create', 'help'}
+RESERVED = {'list', 'stop', 'restore', 'new', 'create', 'help', 'gateway'}
 YES_RE = re.compile(r'^(y|yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|take ?over|take it over)\b[\s.!]*'
                     r'(do it|go ahead|it|please|pls|now)?[\s.!]*$')
 CLOSE_YES_RE = re.compile(r'^(y|yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|close( it)?)\b[\s,.!]*'
@@ -76,6 +80,14 @@ def parse(content: str, known_projects: dict, pending: dict | None = None) -> di
     sub = parts[1].lower()
     if len(parts) == 2 and sub in ('list', 'restore'):
         return {'action': sub}
+    if sub == 'gateway' and len(parts) in (3, 4):
+        verb = parts[3].lower() if len(parts) == 4 else 'start'
+        key = rc_gateways.resolve(parts[2])
+        if parts[2].lower() == 'status' and len(parts) == 3:
+            return {'action': 'gateway', 'gateway': None, 'verb': 'status'}
+        if key and verb in ('start', 'status'):
+            return {'action': 'gateway', 'gateway': key, 'verb': verb}
+        return None
     if len(parts) in (3, 4) and sub in ('create', 'new'):
         name = parts[2]
         if not NAME_RE.match(name) or name.isdigit() or name.lower() in RESERVED:

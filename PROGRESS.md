@@ -17,6 +17,7 @@ Last session: 2026-06-22
 - 2026-10-05 OC-041: `rc` command — create/resume/takeover/list/stop/restore Remote Control sessions; delegate guard for RC-live projects
 
 - 2026-10-06 OC-044: rc stop closes terminal RC sessions (user yes; force for hung), triage gateway now started by boot task — live-tested
+- 2026-10-18 OC-045: `rc gateway gemini|chatgpt [status]` + natural language ("please start the Gemini gateway") starts/checks the LLM gateways
 
 ## Next
 - OC-042: run install-bot-autostart.ps1 (admin, Microsoft account password), then reboot-test

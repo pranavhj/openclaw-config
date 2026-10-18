@@ -176,6 +176,14 @@ r = rcc.format_close_result(['harden'], [], ['hung'])
 check('Closed: `harden`' in r and 'Reply `force`' in r, 'result lists closed and still-busy')
 check(len(q) < 2000, 'fits in one Discord message')
 
+# rc gateway
+check(rcc.parse('rc gateway gemini', KNOWN) == {'action': 'gateway', 'gateway': 'gemini', 'verb': 'start'}, 'rc gateway gemini starts gemini')
+check(rcc.parse('rc gateway chatgpt start', KNOWN)['gateway'] == 'chatgpt', 'rc gateway chatgpt start')
+check(rcc.parse('rc gateway GPT status', KNOWN) == {'action': 'gateway', 'gateway': 'chatgpt', 'verb': 'status'}, 'gpt alias + status')
+check(rcc.parse('rc gateway status', KNOWN) == {'action': 'gateway', 'gateway': None, 'verb': 'status'}, 'rc gateway status = both')
+check(rcc.parse('rc gateway foo', KNOWN) is None, 'unknown gateway falls through')
+check(rcc.parse('rc gateway gemini stop', KNOWN) is None, 'stop is not supported')
+
 print('=' * 50)
 print(f'Results: {PASS} passed, {FAIL} failed')
 sys.exit(0 if FAIL == 0 else 1)
