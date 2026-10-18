@@ -1,7 +1,7 @@
 # OC-030 — Nightly Audit: Rule-Based Log Health Checks + Daily Discord Report
 
 **Type:** feature
-**Status:** done
+**Status:** done (scheduled task disabled 2026-10-18 by user request)
 **Severity:** medium
 
 ## Goal
@@ -73,3 +73,7 @@ Each auto-fix goes through:
 - `CLAUDE.md` (added nightly audit section)
 - `~/projects/nightly_audit_llm_gateway/` (new gateway project for AI analysis)
 - Windows Task Scheduler: `NightlyAudit` task
+
+
+## 2026-10-18 -- Disabled
+User asked to stop the nightly check. Task `NightlyAudit` disabled (not deleted); script kept. Re-enable: `schtasks /change /tn NightlyAudit /enable`.

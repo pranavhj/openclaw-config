@@ -125,7 +125,7 @@ System-wide scripts in `bin/` shared across all Android projects. Each project's
 
 `bin/nightly-audit.py` — daily log health check, no tokens used (Phase 1 rule-based).
 
-Runs at 03:30 via Windows Task Scheduler (task name: `NightlyAudit`).
+Runs at 03:30 via Windows Task Scheduler (task name: `NightlyAudit`). **Disabled 2026-10-18** at the user's request (`schtasks /change /tn NightlyAudit /disable`). Re-enable with `/enable`.
 Audits yesterday's router + gateway timelines and sends a Discord DM report.
 
 **Rule checks:** `exit_nonzero`, `no_reply`, `near_timeout`, `slow`, `failure_detected`, `stdout_forward`, `stale_lock`, `lock_blocked`, `tiny_prompt`, `user_stopped`
