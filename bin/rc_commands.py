@@ -240,7 +240,10 @@ def format_conversations(project: str, convos: list[dict], live_rc: set[str],
 
 
 def format_ready(res: dict) -> str:
-    if res.get('reused'):
+    if res.get('reused_empty'):
+        head = (f'\U0001f7e2 Reusing a fresh `{res["name"]}` session that is already open '
+                f'(nothing typed in it yet)')
+    elif res.get('reused'):
         head = f'\U0001f7e2 `{res["name"]}` is already live on Remote Control'
     elif res.get('copied'):
         head = (f'✅ `{res["name"]}` is live on Remote Control (as a copy — the original '

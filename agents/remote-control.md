@@ -24,7 +24,7 @@ python /d/MyData/Software/openclaw-config/bin/rc_request.py "<rc command>"
 |---|---|
 | `rc <project>` | Shows that project's conversations (numbered, newest first) and asks which to resume. Starts fresh if there are none. |
 | `rc <project> <n>` | Resumes conversation n of that list (1 = newest). |
-| `rc <project> new` | Fresh conversation in that project. |
+| `rc <project> new` | Fresh conversation in that project. **Only** when the user explicitly asks for a fresh/new conversation (see "When to add `new`"). |
 | `rc create <name>` | New project folder; the bot asks the user where. |
 | `rc create <name> <root#>` | New project folder in root #n (see roots below), no question. |
 | `rc list` | Live Remote Control sessions with links. |
@@ -76,6 +76,24 @@ If it could be either, ask **one** short question via discord-send.py, e.g.
 | "the second one" with a pending conversation list | `rc <project from pending> 2` |
 | "the android folder" with a pending create question | `rc create <name> <n of AndroidStudioProjects>` |
 | "the new one" with a pending conversation list | `rc <project> new` |
+
+## When to add `new` (default: don't)
+"Open / remote control / resume <project>" is always plain `rc <project>`. The bot lists the
+conversations and starts fresh by itself if there are none, so you never need to decide that.
+Add `new` **only** when the user explicitly asks for a fresh, new or blank conversation or
+session, or right after you scaffolded a brand-new project.
+- A word that is part of the project's name is not a request: "Table new remote control" →
+  `rc tablenew`, not `rc tablenew new`.
+- Never conclude "there is nothing to resume" from earlier messages or your own earlier replies.
+  Conversations change, and an earlier empty result may have been wrong. Submit `rc <project>`.
+- If `rc_sessions.py convos` returns `[]`, don't guess where the conversation might be
+  (another folder, a parent folder). Submit `rc <project>`: the bot handles it.
+
+| User says | Submit |
+|---|---|
+| "Table new remote control" | `rc tablenew` |
+| "open remote control on end effector cad" (earlier history said nothing to resume) | `rc endeffectorcad` |
+| "start a new conversation in end effector cad" | `rc endeffectorcad new` |
 
 ## Rules for names and locations
 - Project names: lowercase, spaces → `-`, only letters, digits, `_ . -`

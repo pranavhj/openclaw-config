@@ -156,6 +156,57 @@ convs = rc.list_conversations(proj, root=troot)
 check([c['session_id'] for c in convs] == ['bbbb-2', 'aaaa-1'], 'newest first, empty transcript skipped')
 check([c['session_id'] for c in rc.list_conversations(proj, limit=1, root=troot)] == ['bbbb-2'], 'limit')
 
+print('\n--- worktree conversations (transcript moved to <key>--claude-worktrees-<name>) ---')
+wt_path = proj / '.claude' / 'worktrees' / 'feat'
+wt_path.mkdir(parents=True)
+wtdir = troot / (key + '--claude-worktrees-feat')
+wtdir.mkdir()
+(wtdir / 'dddd-4.jsonl').write_text('\n'.join(json.dumps(x) for x in [
+    {'type': 'user', 'entrypoint': 'cli', 'cwd': str(proj), 'message': {'content': 'design the gripper'}},
+    {'type': 'user', 'entrypoint': 'cli', 'cwd': str(wt_path), 'message': {'content': 'now the bracket'}},
+]) + '\n', encoding='utf-8')
+os.utime(wtdir / 'dddd-4.jsonl', (3000, 3000))
+(troot / (key + 'other')).mkdir()  # a different project whose key merely starts with ours
+(troot / (key + 'other') / 'eeee-5.jsonl').write_text(json.dumps(
+    {'type': 'user', 'message': {'content': 'not ours'}}) + '\n', encoding='utf-8')
+check(sorted(d.name for d in rc.transcript_dirs(proj, troot)) == sorted([tdir.name, wtdir.name]),
+      'transcript_dirs = main dir + worktree dirs, not look-alike projects')
+convs = rc.list_conversations(proj, root=troot)
+check([c['session_id'] for c in convs] == ['dddd-4', 'bbbb-2', 'aaaa-1'], 'worktree conversation listed, newest first')
+check(convs[0]['cwd'] == str(wt_path), 'cwd = folder the session was last in (the worktree)')
+(tdir / 'dddd-4.jsonl').write_text(json.dumps({'type': 'summary'}) + '\n', encoding='utf-8')
+os.utime(tdir / 'dddd-4.jsonl', (100, 100))  # stale copy of the same session in the main dir
+check([c['session_id'] for c in rc.list_conversations(proj, root=troot)] == ['dddd-4', 'bbbb-2', 'aaaa-1'],
+      'same session in two dirs listed once (newest copy)')
+(tdir / 'dddd-4.jsonl').unlink()
+check(rc.find_transcript(proj, 'dddd-4', troot) == wtdir / 'dddd-4.jsonl', 'find_transcript searches worktree dirs')
+check(rc.find_transcript(proj, 'zzzz', troot) is None, 'find_transcript: unknown id -> None')
+
+check(rc._in_project(wt_path, proj), 'worktree folder belongs to the project')
+check(rc._in_project(proj, proj), 'project folder belongs to itself')
+check(not rc._in_project(tmp / 'myproj2', proj), 'sibling folder with same prefix does not belong')
+check(not rc._in_project(proj / 'src', proj), 'ordinary subfolder is not a worktree')
+check(rc.launch_dir(proj, str(wt_path)) == wt_path, 'launch_dir: existing worktree -> resume there')
+check(rc.launch_dir(proj, str(proj / '.claude' / 'worktrees' / 'gone')) == proj, 'launch_dir: removed worktree -> project')
+check(rc.launch_dir(proj, str(tmp)) == proj, 'launch_dir: folder outside the project -> project')
+check(rc.launch_dir(proj, None) == proj, 'launch_dir: no cwd -> project')
+
+sdir = tmp / 'sessions-wt'
+sdir.mkdir()
+(sdir / '1.json').write_text(json.dumps({'pid': os.getpid(), 'sessionId': 'dddd-4', 'cwd': str(wt_path),
+                                         'kind': 'bg', 'jobId': 'dddd', 'bridgeSessionId': 'session_W'}), encoding='utf-8')
+(sdir / '2.json').write_text(json.dumps({'pid': os.getpid(), 'sessionId': 'ffff-6', 'cwd': str(proj),
+                                         'kind': 'bg', 'jobId': 'ffff', 'bridgeSessionId': 'session_E'}), encoding='utf-8')
+_orig_live = rc.record_is_live
+rc.record_is_live = lambda rec: True
+check(sorted(r['sessionId'] for r in rc.live_in_dir(proj, sdir)) == ['dddd-4', 'ffff-6'],
+      'live_in_dir includes sessions running in a worktree')
+check(rc.empty_live_rc(proj, troot, sdir)['jobId'] == 'ffff', 'live RC session with no transcript yet = empty, reusable')
+(tdir / 'ffff-6.jsonl').write_text(json.dumps({'type': 'user', 'message': {'content': 'hello'}}) + '\n', encoding='utf-8')
+check(rc.empty_live_rc(proj, troot, sdir) is None, 'live session someone typed into is not reused')
+(tdir / 'ffff-6.jsonl').unlink()
+rc.record_is_live = _orig_live
+
 print('\n--- resume_rc decisions (CLI mocked) ---')
 calls = []
 rc.ensure_trusted = lambda path, *a, **k: True
@@ -183,6 +234,23 @@ rc.resume_rc(proj, 'bg-1')
 check(calls[-1] == ('wake', 'bg-1'), 'background session -> wake without flags')
 rc.resume_rc(proj, 'old-1')
 check(calls[-1] == ('start', 'old-1'), 'closed conversation -> --resume --remote-control')
+_start_mock = rc.start_rc
+_paths = []
+rc.start_rc = lambda path, name=None, resume_id=None, **k: _paths.append((Path(path), name)) or {'url': 'u'}
+rc.resume_rc(proj, 'old-2', cwd=str(wt_path))
+check(_paths[-1] == (wt_path, 'myproj'), 'worktree conversation resumed in its worktree, named after the project')
+rc.resume_rc(proj, 'old-3', cwd=str(proj / '.claude' / 'worktrees' / 'gone'))
+check(_paths[-1] == (proj, 'myproj'), 'worktree removed -> resumed in the project folder')
+_empty_mock = rc.empty_live_rc
+rc.empty_live_rc = lambda path: {'jobId': 'ffff', 'sessionId': 'ffff-6', 'bridgeSessionId': 'session_E', 'cwd': str(proj)}
+r = rc.start_fresh_rc(proj)
+check(r['reused_empty'] and r['url'] == 'https://claude.ai/code/session_E', 'fresh request reuses an empty live session')
+_n = len(_paths)
+rc.empty_live_rc = lambda path: None
+rc.start_fresh_rc(proj)
+check(len(_paths) == _n + 1, 'fresh request with no empty live session starts a new one')
+rc.empty_live_rc = _empty_mock
+rc.start_rc = _start_mock
 
 
 def _wake_fails(cmd, project, name, t):
