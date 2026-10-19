@@ -48,3 +48,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-043](issues/OC-043-natural-language-remote-control.md) | feature | fixed | Natural-language Remote Control: router translates sentences to rc commands, bot validates + runs | `feat(OC-043)` |
 | [OC-044](issues/OC-044-close-terminal-rc-and-triage-gateway.md) | feature | fixed | `rc stop` closes terminal RC sessions on user yes / `force` for hung ones; triage gateway started by boot task | `feat(OC-044)` |
 | [OC-045](issues/OC-045-start-llm-gateways-from-discord.md) | feature | fixed | Start/check Gemini + ChatGPT gateways from Discord (`rc gateway`, natural language) | `feat(OC-045)` |
+| [OC-046](issues/OC-046-rc-misses-worktree-conversations.md) | bug | fixed | `rc <project>` started fresh: worktree conversations not listed, router added `new`, empty sessions piled up | `fix(OC-046)` |

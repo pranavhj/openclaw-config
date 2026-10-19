@@ -309,8 +309,21 @@ def _same_dir(a: str | Path, b: str | Path) -> bool:
     return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
+WORKTREES_SUBDIR = Path('.claude') / 'worktrees'
+
+
+def _in_project(cwd: str | Path, project_path: str | Path) -> bool:
+    """cwd is the project folder itself or one of its Claude worktrees
+    (<project>/.claude/worktrees/<name>, where a session moves after EnterWorktree)."""
+    if _same_dir(cwd, project_path):
+        return True
+    wt_root = os.path.normcase(os.path.abspath(Path(project_path) / WORKTREES_SUBDIR)) + os.sep
+    return os.path.normcase(os.path.abspath(cwd)).startswith(wt_root)
+
+
 def live_in_dir(project_path: str | Path, sessions_dir: Path = SESSIONS_DIR) -> list[dict]:
-    return [r for r in session_records(sessions_dir) if r.get('cwd') and _same_dir(r['cwd'], project_path)]
+    """Live sessions in this project folder, including ones running in its worktrees."""
+    return [r for r in session_records(sessions_dir) if r.get('cwd') and _in_project(r['cwd'], project_path)]
 
 
 def live_rc_in_dir(project_path: str | Path, sessions_dir: Path = SESSIONS_DIR) -> list[dict]:
@@ -403,6 +416,18 @@ def transcript_dir(project_path: str | Path, root: Path = TRANSCRIPTS_DIR) -> Pa
     return None
 
 
+def transcript_dirs(project_path: str | Path, root: Path = TRANSCRIPTS_DIR) -> list[Path]:
+    """The project's transcript dir plus those of its Claude worktrees. A session that
+    enters a worktree has its whole transcript moved to the worktree's key
+    (<key>--claude-worktrees-<name>), so listing only <key> misses those conversations."""
+    if not root.exists():
+        return []
+    key = re.sub(r'[^A-Za-z0-9]', '-', str(Path(project_path).resolve())).lower()
+    wt_prefix = key + '--claude-worktrees-'
+    return [d for d in root.iterdir()
+            if d.is_dir() and (d.name.lower() == key or d.name.lower().startswith(wt_prefix))]
+
+
 def _text_of(content) -> str:
     if isinstance(content, str):
         return content
@@ -416,6 +441,7 @@ def summarize_transcript(path: Path) -> dict:
     title = first_prompt = ''
     user_turns = 0
     entrypoints = set()
+    cwd = ''
     with path.open(encoding='utf-8', errors='replace') as fh:
         for ln in fh:
             try:
@@ -427,6 +453,8 @@ def summarize_transcript(path: Path) -> dict:
             t = o.get('type')
             if o.get('entrypoint'):
                 entrypoints.add(o['entrypoint'])
+            if o.get('cwd'):
+                cwd = o['cwd']  # last one wins: the folder the session was in at the end
             if t in ('ai-title', 'custom-title'):
                 title = o.get('aiTitle') or o.get('customTitle') or title
             elif t == 'user' and not o.get('isMeta') and not o.get('isSidechain'):
@@ -448,13 +476,15 @@ def summarize_transcript(path: Path) -> dict:
         'first_prompt': re.sub(r'\s+', ' ', first_prompt)[:120],
         'user_turns': user_turns,
         'source': source,
+        'cwd': cwd,
     }
 
 
 def list_conversations(project_path: str | Path, limit: int = 8, root: Path = TRANSCRIPTS_DIR) -> list[dict]:
-    """Most recent conversations in a project folder, newest first. Empty ones are skipped."""
-    d = transcript_dir(project_path, root)
-    if not d:
+    """Most recent conversations in a project folder and its Claude worktrees, newest first.
+    Empty ones are skipped. Each has 'cwd' = the folder the session was last in."""
+    dirs = transcript_dirs(project_path, root)
+    if not dirs:
         return []
     def _mtime(p: Path) -> float:
         try:
@@ -462,20 +492,64 @@ def list_conversations(project_path: str | Path, limit: int = 8, root: Path = TR
         except OSError:
             return 0.0  # deleted between glob and stat; summarize will skip it
 
-    files = sorted(d.glob('*.jsonl'), key=_mtime, reverse=True)
-    out = []
+    files = sorted((f for d in dirs for f in d.glob('*.jsonl')), key=_mtime, reverse=True)
+    out, seen = [], set()
     for f in files:
+        if f.stem in seen:  # same session in two dirs: keep the newest copy
+            continue
         try:
             s = summarize_transcript(f)
         except OSError as e:
             log.warning('list_conversations: cannot read %s: %s', f, e)
             continue
+        seen.add(f.stem)
         if s['user_turns'] == 0:
             continue
         out.append(s)
         if len(out) >= limit:
             break
+    log.debug('list_conversations: %s -> %d conversations from %d dirs', project_path, len(out), len(dirs))
     return out
+
+
+def find_transcript(project_path: str | Path, session_id: str, root: Path = TRANSCRIPTS_DIR) -> Path | None:
+    for d in transcript_dirs(project_path, root):
+        f = d / f'{session_id}.jsonl'
+        if f.is_file():
+            return f
+    return None
+
+
+def launch_dir(project_path: str | Path, convo_cwd: str | None) -> Path:
+    """Folder to resume a conversation in: where it last ran (e.g. a worktree) if that still
+    exists and belongs to this project, else the project folder. Resuming a worktree
+    conversation from the project folder works but loses the worktree's files."""
+    project = Path(project_path)
+    if convo_cwd and Path(convo_cwd).is_dir() and _in_project(convo_cwd, project):
+        return Path(convo_cwd)
+    if convo_cwd and not _same_dir(convo_cwd, project):
+        log.info('launch_dir: %s is gone or outside %s; using the project folder', convo_cwd, project)
+    return project
+
+
+def empty_live_rc(project_path: str | Path, root: Path = TRANSCRIPTS_DIR,
+                  sessions_dir: Path = SESSIONS_DIR) -> dict | None:
+    """A live background RC session in the project folder that nobody has typed into yet,
+    so a "fresh" request can reuse it instead of piling up another empty session."""
+    for rec in live_rc_in_dir(project_path, sessions_dir):
+        if rec.get('kind') != 'bg' or not rec.get('jobId') or not rec.get('sessionId'):
+            continue
+        if not _same_dir(rec.get('cwd', ''), project_path):
+            continue
+        f = find_transcript(project_path, rec['sessionId'], root)
+        try:
+            turns = summarize_transcript(f)['user_turns'] if f else 0
+        except OSError as e:
+            log.warning('empty_live_rc: cannot read %s: %s', f, e)
+            continue
+        if turns == 0:
+            return rec
+    return None
 
 
 def create_project(root: str | Path, name: str) -> Path:
@@ -559,19 +633,33 @@ def start_rc(project_path: str | Path, name: str | None = None, resume_id: str |
     return _launch_and_wait(build_start_cmd(name, resume_id, permission_mode), project, name, timeout_s)
 
 
+def start_fresh_rc(project_path: str | Path, name: str | None = None, timeout_s: float = 30) -> dict:
+    """Fresh Remote Control session, reusing an untouched one already live in this folder."""
+    project = Path(project_path)
+    name = name or project.name
+    rec = empty_live_rc(project)
+    if rec:
+        log.info('start_fresh_rc: reusing empty live session %s in %s', rec['jobId'], project)
+        return dict(_result(rec, rec['jobId'], name, project, reused=True), reused_empty=True)
+    return start_rc(project, name, timeout_s=timeout_s)
+
+
 def resume_rc(project_path: str | Path, session_id: str, name: str | None = None,
-              allow_copy: bool = False, timeout_s: float = 30) -> dict:
+              allow_copy: bool = False, timeout_s: float = 30, cwd: str | None = None) -> dict:
     """Bring one existing conversation up on Remote Control, picking the safe path:
       - already live with RC        -> return its link (reused=True)
       - live in a terminal, no RC   -> RCLiveElsewhere unless allow_copy (then a copy)
       - background session, not live -> wake with saved options (no flags);
                                        copy if that has no Remote Control
       - otherwise                   -> --resume <id> --remote-control (same id)
+    Launches in `cwd` (where the conversation last ran, e.g. a worktree) when that still
+    exists inside the project; the display name stays the project's.
     """
     project = Path(project_path)
     if not project.is_dir():
         raise RCError(f'project folder does not exist: {project}')
     name = name or project.name
+    project = launch_dir(project, cwd)
     live = [r for r in session_records() if r.get('sessionId') == session_id]
     if live:
         rec = live[0]
@@ -616,7 +704,7 @@ def kill_pid(pid: int, wait_s: float = 10) -> bool:
 
 
 def takeover(project_path: str | Path, session_id: str, name: str | None = None,
-             timeout_s: float = 30) -> dict:
+             timeout_s: float = 30, cwd: str | None = None) -> dict:
     """Move a conversation that is open in a terminal (no Remote Control) onto Remote
     Control: end that terminal's claude process — only if it is idle, so no turn is cut
     off — then resume the same session id in the background with Remote Control."""
@@ -624,7 +712,7 @@ def takeover(project_path: str | Path, session_id: str, name: str | None = None,
     if live:
         rec = live[0]
         if rec.get('bridgeSessionId'):
-            return resume_rc(project_path, session_id, name, timeout_s=timeout_s)
+            return resume_rc(project_path, session_id, name, timeout_s=timeout_s, cwd=cwd)
         status = rec.get('status')
         if rec.get('kind') == 'bg' and rec.get('jobId'):
             log.info('takeover: stopping bg session %s (no RC) instead of killing', rec['jobId'])
@@ -634,7 +722,7 @@ def takeover(project_path: str | Path, session_id: str, name: str | None = None,
                 if time.monotonic() > deadline:
                     raise RCError(f'background session {rec["jobId"]} did not stop within 10s')
                 time.sleep(0.5)
-            return resume_rc(project_path, session_id, name, timeout_s=timeout_s)
+            return resume_rc(project_path, session_id, name, timeout_s=timeout_s, cwd=cwd)
         if rec.get('kind') != 'interactive':
             raise RCError(f'session kind `{rec.get("kind")}` cannot be taken over \u2014 use `copy`.')
         if status != 'idle':
@@ -645,7 +733,7 @@ def takeover(project_path: str | Path, session_id: str, name: str | None = None,
         log.warning('takeover: ending terminal claude pid=%s for session %s', rec.get('pid'), session_id)
         if not kill_pid(rec['pid']):
             raise RCError(f'could not end terminal process {rec["pid"]}')
-    return resume_rc(project_path, session_id, name, timeout_s=timeout_s)
+    return resume_rc(project_path, session_id, name, timeout_s=timeout_s, cwd=cwd)
 
 
 def stop_rc_in_dir(project_path: str | Path) -> list[str]:

@@ -19,6 +19,7 @@ Last session: 2026-06-22
 - 2026-10-06 OC-044: rc stop closes terminal RC sessions (user yes; force for hung), triage gateway now started by boot task — live-tested
 - 2026-10-18 OC-045: `rc gateway gemini|chatgpt [status]` + natural language ("please start the Gemini gateway") starts/checks the LLM gateways
 - 2026-10-18 OC-030: nightly audit task disabled at user request (re-enable: schtasks /change /tn NightlyAudit /enable)
+- 2026-10-19 OC-046: `rc <project>` now lists conversations stored in worktree transcript dirs, resumes them in their worktree, reuses empty live sessions; router told not to add `new` on its own
 
 ## Next
 - OC-042: run install-bot-autostart.ps1 (admin, Microsoft account password), then reboot-test

@@ -217,16 +217,18 @@ async def _rc_gateway(message, sid: str, act: dict):
     await message.reply(f'{msg}\n{rc_commands.FOOTER}')
 
 
-async def _rc_resume(message, sid: str, ch: str, path: str, session_id: str, allow_copy: bool = False):
+async def _rc_resume(message, sid: str, ch: str, path: str, session_id: str, allow_copy: bool = False,
+                     cwd: str | None = None):
+    """cwd = folder the conversation last ran in (may be a worktree of `path`)."""
     name = Path(path).name
     try:
         await _rc_run(message, sid, f'Resuming `{session_id[:8]}` in `{name}`',
-                      rc_sessions.resume_rc, path, session_id, name, allow_copy)
+                      rc_sessions.resume_rc, path, session_id, name, allow_copy, 30, cwd)
     except rc_sessions.RCLiveElsewhere as e:
         _tl({'ts': _ts_iso(), 'sid': sid, 'event': 'rc_live_elsewhere', 'project': path,
              'session_id': session_id, 'status': e.status, 'pid': e.pid})
         # strict: if the router's request caused this question, only a plain "yes" consents
-        _rc_pending[ch] = rc_commands.new_pending('elsewhere', path=path, session_id=session_id,
+        _rc_pending[ch] = rc_commands.new_pending('elsewhere', path=path, session_id=session_id, cwd=cwd,
                                                   strict=getattr(message, 'from_router', False))
         await message.reply(rc_commands.format_live_elsewhere(name, e.status))
 
@@ -234,7 +236,7 @@ async def _rc_resume(message, sid: str, ch: str, path: str, session_id: str, all
 async def _rc_start_fresh(message, sid: str, path: str):
     name = Path(path).name
     await _rc_run(message, sid, f'Starting a fresh Remote Control session in `{name}`',
-                  rc_sessions.start_rc, path, name)
+                  rc_sessions.start_fresh_rc, path, name)
 
 
 async def _rc_open(message, sid: str, ch: str, path: str, arg: str | None):
@@ -253,7 +255,7 @@ async def _rc_open(message, sid: str, ch: str, path: str, arg: str | None):
         if n == 0:
             await _rc_start_fresh(message, sid, path)
         elif 1 <= n <= len(convos):
-            await _rc_resume(message, sid, ch, path, convos[n - 1]['session_id'])
+            await _rc_resume(message, sid, ch, path, convos[n - 1]['session_id'], cwd=convos[n - 1].get('cwd'))
         else:
             await message.reply(f'Pick 0–{len(convos)}.\n{rc_commands.FOOTER}')
         return
@@ -263,6 +265,7 @@ async def _rc_open(message, sid: str, ch: str, path: str, arg: str | None):
     _rc_pending[ch] = rc_commands.new_pending(
         'convo', path=path, project=Path(path).name.lower(),
         convos=[c['session_id'] for c in convos],
+        cwds=[c.get('cwd') for c in convos],
         labels=[f'{c["title"] or c["first_prompt"][:60] or "(untitled)"} '
                 f'({datetime.fromtimestamp(c["mtime"]):%b %d}, {c["user_turns"]} msgs, {c["source"]}'
                 + (', LIVE on Remote Control' if c['session_id'] in live_rc else
@@ -296,7 +299,9 @@ async def _rc_pick(message, sid: str, ch: str, n: int):
         if n == 0:
             await _rc_start_fresh(message, sid, pend['path'])
         elif 1 <= n <= len(ids):
-            await _rc_resume(message, sid, ch, pend['path'], ids[n - 1])
+            cwds = pend.get('cwds') or []
+            await _rc_resume(message, sid, ch, pend['path'], ids[n - 1],
+                             cwd=cwds[n - 1] if n <= len(cwds) else None)
         else:
             _rc_pending[ch] = pend
             await message.reply(f'Pick 0–{len(ids)}.\n{rc_commands.FOOTER}')
@@ -403,15 +408,17 @@ async def _handle_rc_inner(message, act: dict, sid: str):
         await _rc_pick(message, sid, ch, act['n'])
     elif a == 'copy':
         pend = _rc_pending.pop(ch)
-        await _rc_resume(message, sid, ch, pend['path'], pend['session_id'], allow_copy=True)
+        await _rc_resume(message, sid, ch, pend['path'], pend['session_id'], allow_copy=True,
+                         cwd=pend.get('cwd'))
     elif a == 'takeover':
         pend = _rc_pending.pop(ch)
         _log_human(f'[{sid}] RC takeover of {pend["session_id"][:8]} in {pend["path"]}')
         res = await _rc_run(message, sid, f'Taking over `{pend["session_id"][:8]}` in `{Path(pend["path"]).name}`',
-                            rc_sessions.takeover, pend['path'], pend['session_id'], Path(pend['path']).name)
+                            rc_sessions.takeover, pend['path'], pend['session_id'], Path(pend['path']).name,
+                            30, pend.get('cwd'))
         if res is None:  # e.g. busy: keep the question open so `takeover`/`copy` still work
             _rc_pending[ch] = rc_commands.new_pending('elsewhere', path=pend['path'],
-                                                      session_id=pend['session_id'])
+                                                      session_id=pend['session_id'], cwd=pend.get('cwd'))
 
 
 # Common words that should never trigger prefix matching against project names
