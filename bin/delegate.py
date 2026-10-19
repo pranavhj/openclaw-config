@@ -11,6 +11,7 @@ import glob
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -107,6 +108,110 @@ def _extract_last_reply(agent_start_time=None, max_chars=500) -> str:
     except Exception:
         pass
     return ''
+
+
+_SEND_MSG_RE = re.compile(r'''--message\s+(?:"((?:[^"\\]|\\.)*)"|'([^']*)')''', re.DOTALL)
+_RC_REQ_RE = re.compile(r'''rc_request\.py\s+(?:"([^"]+)"|'([^']+)')''')
+_SPAWN_RE = re.compile(r'agent-smart\.py\b(?!.*--compact-only)')
+
+
+def _router_transcript_dir(work_dir: Path = WORK_DIR, projects_dir: str = CLAUDE_PROJECTS_DIR) -> Path | None:
+    key = re.sub(r'[^A-Za-z0-9]', '-', str(work_dir.resolve())).lower()
+    root = Path(projects_dir)
+    if not root.is_dir():
+        return None
+    return next((d for d in root.iterdir() if d.is_dir() and d.name.lower() == key), None)
+
+
+def _user_text(entry: dict) -> str | None:
+    """Text of a real user prompt (not a tool result), or None."""
+    if entry.get('type') != 'user' or entry.get('isMeta'):
+        return None
+    content = (entry.get('message') or {}).get('content')
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = [c.get('text', '') for c in content if isinstance(c, dict) and c.get('type') == 'text']
+        return ' '.join(texts) if texts else None
+    return None
+
+
+def summarize_turn(entries: list[dict], max_chars: int = 300) -> str:
+    """What the router did on one turn, for the next prompt's history: the Discord message it
+    sent, else the rc command it submitted, else its last non-trivial text."""
+    sent, rc_cmd, spawned, text = '', '', False, ''
+    for e in entries:
+        content = (e.get('message') or {}).get('content')
+        if e.get('type') != 'assistant' or not isinstance(content, list):
+            continue
+        for c in content:
+            if not isinstance(c, dict):
+                continue
+            if c.get('type') == 'tool_use':
+                cmd = str((c.get('input') or {}).get('command', ''))
+                if 'discord-send.py' in cmd and (m := _SEND_MSG_RE.search(cmd)):
+                    sent = (m.group(1) if m.group(1) is not None else m.group(2)).replace('\\"', '"').replace('\\n', ' ')
+                elif m := _RC_REQ_RE.search(cmd):
+                    rc_cmd = m.group(1) or m.group(2)
+                elif _SPAWN_RE.search(cmd):
+                    spawned = True
+            elif c.get('type') == 'text' and c.get('text', '').strip() not in TRIVIAL_REPLIES:
+                text = c['text'].strip()
+    if sent:
+        out = sent
+    elif rc_cmd:
+        out = f'(submitted `{rc_cmd}`; the bot replied with the result)'
+    elif spawned:
+        out = '(handed to the project sub-session, which replied itself)'
+    else:
+        out = text
+    return re.sub(r'\s+', ' ', out).strip()[:max_chars]
+
+
+def _extract_turn_reply(request: str, agent_start_time: float, max_chars: int = 300,
+                        transcript_dir: Path | None = None) -> str:
+    """OC-046: reply for THIS request only. Looks in the router's own transcripts (changed since
+    the agent started) for the turn whose prompt contains `request`, and summarizes only that
+    turn. The old _extract_last_reply searched every transcript on the machine and walked back
+    past the current turn, so a turn that only output SENT picked up an earlier turn's text or
+    another session's (e.g. "Nothing to resume" logged under the wrong project)."""
+    d = transcript_dir or _router_transcript_dir()
+    if not d or not request:
+        return ''
+    needle = request.strip()[:200]
+    files = sorted((f for f in d.glob('*.jsonl') if f.stat().st_mtime >= agent_start_time),
+                   key=lambda f: f.stat().st_mtime, reverse=True)
+    for f in files:
+        entries = []
+        for ln in f.read_text(encoding='utf-8', errors='replace').splitlines():
+            try:
+                o = json.loads(ln)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(o, dict):
+                entries.append(o)
+        start = None
+        for i in range(len(entries) - 1, -1, -1):
+            t = _user_text(entries[i])
+            # match the Request section only: later prompts quote this message in their history
+            if t and '## Request' in t and t.rsplit('## Request', 1)[1].strip().startswith(needle):
+                start = i
+                break
+        if start is None:
+            continue
+        turn = []
+        for e in entries[start + 1:]:
+            if _user_text(e) is not None and e.get('type') == 'user' and not _is_tool_result(e):
+                break  # next real prompt
+            turn.append(e)
+        return summarize_turn(turn, max_chars)
+    return ''
+
+
+def _is_tool_result(entry: dict) -> bool:
+    content = (entry.get('message') or {}).get('content')
+    return isinstance(content, list) and any(isinstance(c, dict) and c.get('type') == 'tool_result'
+                                             for c in content)
 
 
 def discord_send(channel: str, target: str, message: str) -> int:
@@ -411,7 +516,9 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
     if history:
         prompt += (
             '## Recent messages (context only \u2014 do not reply to these)\n'
-            f'Each entry is tagged [project]. Only use entries matching [openclaw] as context; ignore others.\n'
+            f'Earlier messages that were routed to [{slug}], oldest first. "Claude:" is what was '
+            f'sent back then; it may be out of date, so re-check facts (e.g. conversation lists) '
+            f'instead of relying on it.\n'
             f'{history}\n\n'
         )
     rc_pending = os.environ.get('OPENCLAW_RC_PENDING', '')
@@ -557,7 +664,11 @@ def _run(channel, target, message, today, log_file, tl_log, ts_recv,
         'duration_ms': duration_ms, 'output_preview': output[:60].replace('\n', ' ')})
 
     # Extract and log Claude's reply from the JSONL session file
-    reply_preview = _extract_last_reply(agent_start_time=t_agent_wall, max_chars=300)
+    try:
+        reply_preview = _extract_turn_reply(message, t_agent_wall, max_chars=300)
+    except OSError as e:
+        log(f'reply extraction failed: {e}')
+        reply_preview = ''
     if reply_preview:
         tl({'ts': ts_ms(), 'event': 'delegate_reply',
             'reply_preview': reply_preview.replace('\n', ' ')})

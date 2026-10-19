@@ -42,9 +42,15 @@ ur_arm_setup, TableNew on retry) showed the list correctly.
   Project-name words don't count, never infer "nothing to resume" from history, and don't
   speculate when `convos` is `[]`.
 
-## Not fixed (noted for later)
-- delegate.py's "Recent messages" header always says "Only use entries matching [openclaw]",
-  whatever the project, and the router's stray text can be recorded under the wrong project tag.
+- **Router history (delegate.py).** The "Recent messages" header said "Only use entries matching
+  [openclaw]", but each prompt only loads the routed project's own timeline, so every entry was
+  tagged with another project. It now names the project and warns that old replies may be out
+  of date. The "Claude:" reply was captured by `_extract_last_reply`, which searched every
+  transcript on the machine changed during the run and walked back past the current turn. A
+  turn that only output SENT took an earlier turn's text or another session's ("Nothing to
+  resume" logged under [gemini_gateway]). New `_extract_turn_reply` reads only the router's
+  transcripts, finds the turn whose `## Request` is this message, and records what that turn
+  did: the Discord message sent, the rc command submitted, or a hand-off to a sub-session.
 
 ## Files Changed
 - bin/rc_sessions.py
@@ -52,3 +58,6 @@ ur_arm_setup, TableNew on retry) showed the list correctly.
 - bin/discord-bot.py
 - agents/remote-control.md
 - tests/test_rc_sessions.py
+- bin/delegate.py
+- bin/run-tests.py
+- tests/test_delegate_history.py

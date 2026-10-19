@@ -33,6 +33,7 @@ SUITES = [
     ('RC session tests',      TESTS_DIR / 'test_rc_sessions.py'),
     ('RC command tests',      TESTS_DIR / 'test_rc_commands.py'),
     ('RC request tests',      TESTS_DIR / 'test_rc_request.py'),
+    ('Delegate history tests', TESTS_DIR / 'test_delegate_history.py'),
     ('Integration tests',     TESTS_DIR / 'test_integration.py'),
     ('Behavior tests',        TESTS_DIR / 'test_claude_behavior.py'),
 ]
