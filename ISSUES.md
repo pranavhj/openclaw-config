@@ -49,3 +49,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-044](issues/OC-044-close-terminal-rc-and-triage-gateway.md) | feature | fixed | `rc stop` closes terminal RC sessions on user yes / `force` for hung ones; triage gateway started by boot task | `feat(OC-044)` |
 | [OC-045](issues/OC-045-start-llm-gateways-from-discord.md) | feature | fixed | Start/check Gemini + ChatGPT gateways from Discord (`rc gateway`, natural language) | `feat(OC-045)` |
 | [OC-046](issues/OC-046-rc-misses-worktree-conversations.md) | bug | fixed | `rc <project>` started fresh: worktree conversations not listed, router added `new`, empty sessions piled up | `fix(OC-046)` |
+| [OC-047](issues/OC-047-rc-picker-expired-late-answer.md) | bug | fixed | Late `0` to the `rc <project>` picker (after 10 min) went to the router; pickers now open 1 h, late numbers get "list expired, resend" | `fix(OC-047)` |

@@ -341,6 +341,8 @@ async def _handle_rc_inner(message, act: dict, sid: str):
 
     if a == 'help':
         await message.reply(rc_commands.USAGE)
+    elif a == 'pick_expired':
+        await message.reply(rc_commands.format_pick_expired(act))
     elif a == 'bad_name':
         await message.reply(f'`{act["name"]}` isn’t a valid folder name '
                             f'(letters, digits, `_ . -`).\n{rc_commands.FOOTER}')

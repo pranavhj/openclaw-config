@@ -14,7 +14,7 @@ Commands:
     rc restore                   bring back bot-started sessions (after reboot)
     rc gateway <gemini|chatgpt> [start|status]   start a gateway / check it
     rc gateway status            status of both gateways
-    <n> | copy | takeover        answer a pending question (10 min window)
+    <n> | copy | takeover        answer a pending question (number picks: 1 hour, others: 10 min)
 
 Anything else starting with "rc " that does not name a project falls through to normal
 routing, so messages like "rc car won't charge" are not hijacked.
@@ -29,6 +29,13 @@ from pathlib import Path
 import rc_gateways
 
 PENDING_TTL_S = 600
+# A number list (conversation / create-root picker) stays open longer: people read it, step
+# away and answer later (OC-047). Any other message still closes it, so a stray number can't
+# act on it. After expiry, a bare number within STALE_PICK_S gets "list expired, resend" rather
+# than being sent to the router, which has no idea what "0" means.
+PICK_TTL_S = 3600
+STALE_PICK_S = 24 * 3600
+PICK_KINDS = ('convo', 'create')
 FOOTER = '-# sent by claude'
 NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$')
 RESERVED = {'list', 'stop', 'restore', 'new', 'create', 'help', 'gateway'}
@@ -72,6 +79,10 @@ def parse(content: str, known_projects: dict, pending: dict | None = None) -> di
                 return {'action': 'force_close'}
             if CLOSE_STRICT_RE.match(low) if pending.get('strict') else CLOSE_YES_RE.match(low):
                 return {'action': 'close'}
+    if (pending and pending.get('kind') in PICK_KINDS and re.fullmatch(r'[0-9]{1,2}', s)
+            and pending.get('expires', 0) <= time.time() < pending.get('expires', 0) + STALE_PICK_S):
+        return {'action': 'pick_expired', 'kind': pending['kind'],
+                'project': pending.get('project'), 'name': pending.get('name')}
     parts = s.split()
     if not parts or parts[0].lower() != 'rc':
         return None
@@ -119,7 +130,18 @@ def _match(name: str, known_projects: dict) -> dict:
 
 
 def new_pending(kind: str, **data) -> dict:
-    return {'kind': kind, 'expires': time.time() + PENDING_TTL_S, **data}
+    ttl = PICK_TTL_S if kind in PICK_KINDS else PENDING_TTL_S
+    return {'kind': kind, 'expires': time.time() + ttl, **data}
+
+
+def format_pick_expired(act: dict) -> str:
+    """Reply to a number sent after the picker list expired (OC-047)."""
+    if act.get('kind') == 'create':
+        again = f'rc create {act.get("name")}'
+    else:
+        again = f'rc {act.get("project")}'
+    return (f'⌛ That list expired (lists stay open for {PICK_TTL_S // 60} min). '
+            f'Send `{again}` again for a fresh one.\n{FOOTER}')
 
 
 # Actions an LLM-submitted request may not trigger: they need the user's own reply.
