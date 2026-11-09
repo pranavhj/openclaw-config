@@ -36,7 +36,8 @@ KNOWN = {'dairy': 'C:/p/dairy', 'dairy_llm_gateway': 'C:/p/dairy_llm_gateway',
          'shaadibot': 'C:/p/shaadibot', 'cricketapp': 'C:/p/cricketApp'}
 PENDING_CONVO = {'kind': 'convo', 'expires': time.time() + 60, 'path': 'C:/p/dairy', 'convos': ['a', 'b']}
 PENDING_ELSEWHERE = {'kind': 'elsewhere', 'expires': time.time() + 60, 'path': 'C:/p/dairy', 'session_id': 'a'}
-PENDING_EXPIRED = {'kind': 'convo', 'expires': time.time() - 1, 'path': 'C:/p/dairy', 'convos': ['a']}
+PENDING_EXPIRED = {'kind': 'convo', 'expires': time.time() - 1, 'path': 'C:/p/dairy', 'project': 'dairy', 'convos': ['a']}
+PENDING_LONG_EXPIRED = {'kind': 'convo', 'expires': time.time() - 25 * 3600, 'path': 'C:/p/dairy', 'convos': ['a']}
 
 print('\n--- parse: not ours (falls through to normal routing) ---')
 check(rcc.parse('rc car won\u2019t charge', KNOWN) is None, 'rc + unknown word + text -> None')
@@ -45,7 +46,7 @@ check(rcc.parse('fix the dairy app', KNOWN) is None, 'normal message -> None')
 check(rcc.parse('rcdairy', KNOWN) is None, 'no space after rc -> None')
 check(rcc.parse('rc dairy please fix the login', KNOWN) is None, 'project + free text -> None')
 check(rcc.parse('3', KNOWN, None) is None, 'bare number without pending -> None')
-check(rcc.parse('3', KNOWN, PENDING_EXPIRED) is None, 'bare number with expired pending -> None')
+check(rcc.parse('3', KNOWN, PENDING_LONG_EXPIRED) is None, 'bare number a day after the list expired -> None')
 check(rcc.parse('copy', KNOWN, PENDING_CONVO) is None, 'copy when not asked -> None')
 
 print('\n--- parse: commands ---')
@@ -183,6 +184,18 @@ check(rcc.parse('rc gateway GPT status', KNOWN) == {'action': 'gateway', 'gatewa
 check(rcc.parse('rc gateway status', KNOWN) == {'action': 'gateway', 'gateway': None, 'verb': 'status'}, 'rc gateway status = both')
 check(rcc.parse('rc gateway foo', KNOWN) is None, 'unknown gateway falls through')
 check(rcc.parse('rc gateway gemini stop', KNOWN) is None, 'stop is not supported')
+
+
+print('\n--- OC-047: picker answered late ---')
+check(rcc.new_pending('convo')['expires'] - time.time() > 3500, 'conversation picker stays open ~1 hour')
+check(rcc.new_pending('create', name='x')['expires'] - time.time() > 3500, 'create-root picker stays open ~1 hour')
+check(rcc.new_pending('elsewhere')['expires'] - time.time() < 700, 'takeover question keeps 10 min')
+check(rcc.parse('0', KNOWN, PENDING_EXPIRED) == {'action': 'pick_expired', 'kind': 'convo', 'project': 'dairy', 'name': None},
+      'bare 0 after the list expired -> pick_expired, not the router')
+check('`rc dairy`' in rcc.format_pick_expired({'kind': 'convo', 'project': 'dairy'}), 'expired reply says to resend rc dairy')
+check('`rc create myapp`' in rcc.format_pick_expired({'kind': 'create', 'name': 'myapp'}), 'expired create reply says rc create myapp')
+check(rcc.parse('hello', KNOWN, PENDING_EXPIRED) is None, 'text after expired list -> normal routing')
+check(rcc.parse('rc dairy', KNOWN, PENDING_EXPIRED)['action'] == 'open', 'rc command after expired list still works')
 
 print('=' * 50)
 print(f'Results: {PASS} passed, {FAIL} failed')
