@@ -21,6 +21,7 @@ Last session: 2026-06-22
 - 2026-10-18 OC-030: nightly audit task disabled at user request (re-enable: schtasks /change /tn NightlyAudit /enable)
 - 2026-10-19 OC-046: `rc <project>` now lists conversations stored in worktree transcript dirs, resumes them in their worktree, reuses empty live sessions; router told not to add `new` on its own
 - 2026-11-09 OC-047: `rc <project>` number picker stays open 1 h (was 10 min); a late number after expiry gets "list expired, resend" instead of going to the router
+- 2026-11-09 OC-048: `rc gateway` now targets the gateways on the Pi 5 (ssh pi5 + systemctl); .claude/worktrees/ gitignored
 
 ## Next
 - OC-042: run install-bot-autostart.ps1 (admin, Microsoft account password), then reboot-test

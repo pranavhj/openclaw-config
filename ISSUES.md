@@ -50,3 +50,4 @@ Statuses: `open` `fixed` `wontfix` `investigating`
 | [OC-045](issues/OC-045-start-llm-gateways-from-discord.md) | feature | fixed | Start/check Gemini + ChatGPT gateways from Discord (`rc gateway`, natural language) | `feat(OC-045)` |
 | [OC-046](issues/OC-046-rc-misses-worktree-conversations.md) | bug | fixed | `rc <project>` started fresh: worktree conversations not listed, router added `new`, empty sessions piled up | `fix(OC-046)` |
 | [OC-047](issues/OC-047-rc-picker-expired-late-answer.md) | bug | fixed | Late `0` to the `rc <project>` picker (after 10 min) went to the router; pickers now open 1 h, late numbers get "list expired, resend" | `fix(OC-047)` |
+| [OC-048](issues/OC-048-gateways-on-pi5.md) | config | fixed | `rc gateway` pings/restarts the Gemini + ChatGPT gateways on the Pi 5 (systemd via ssh) instead of this PC | `config(OC-048)` |

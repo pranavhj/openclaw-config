@@ -30,7 +30,7 @@ python /d/MyData/Software/openclaw-config/bin/rc_request.py "<rc command>"
 | `rc list` | Live Remote Control sessions with links. |
 | `rc stop <project>` | Stops Remote Control sessions the bot started there. If Claude terminal sessions there have Remote Control on, the bot asks the user whether to close them (`yes`; `force` for a busy/hung one). |
 | `rc restore` | Brings back bot-started sessions (e.g. after a reboot). |
-| `rc gateway gemini` / `rc gateway chatgpt` | Starts the Gemini (port 18790) / ChatGPT (port 18791) gateway if it isn't already up. |
+| `rc gateway gemini` / `rc gateway chatgpt` | Restarts the Gemini (port 18790) / ChatGPT (port 18791) gateway on the Raspberry Pi 5 (`pi5.local`, systemd service via `ssh pi5`) if it isn't answering `/ping`. |
 | `rc gateway <gemini\|chatgpt> status` / `rc gateway status` | Whether that gateway (or both) answers /ping. |
 
 **Never submit** `takeover`, `copy` or a bare number — those are answers only the user can give

@@ -13,23 +13,25 @@ import time
 import urllib.request
 from pathlib import Path
 
-SERVICE_DIR = Path(r'C:\Users\prana\AndroidStudioProjects\gemini_gateway\service')
-LOGDIR = Path(os.getenv('LOCALAPPDATA') or tempfile.gettempdir()) / 'openclaw'
+# The gateways run on the Raspberry Pi 5 as systemd services (moved off this PC 2026-10-24).
+PI_HOST = os.getenv('GATEWAY_PI_HOST', 'pi5.local')   # HTTP host for /ping
+PI_SSH = os.getenv('GATEWAY_PI_SSH', 'pi5')           # ssh alias from ~/.ssh/config
+PI_LOG_DIR = '~/gemini_gateway/logs'
 GATEWAYS = {
-    'gemini': {'script': 'gemini_gateway.py', 'port': 18790},
-    'chatgpt': {'script': 'chatgpt_gateway.py', 'port': 18791},
+    'gemini': {'service': 'gemini-gateway', 'port': 18790},
+    'chatgpt': {'service': 'chatgpt-gateway', 'port': 18791},
 }
 ALIASES = {'gemini': 'gemini', 'chatgpt': 'chatgpt', 'gpt': 'chatgpt', 'openai': 'chatgpt'}
-START_WAIT_S = 45
+START_WAIT_S = 90   # Chromium on the Pi takes ~30-60 s to log in and warm up
 
 
 def resolve(name: str) -> str | None:
     return ALIASES.get(name.lower())
 
 
-def is_up(key: str, timeout: float = 2.0) -> bool:
+def is_up(key: str, timeout: float = 3.0) -> bool:
     try:
-        with urllib.request.urlopen(f'http://localhost:{GATEWAYS[key]["port"]}/ping', timeout=timeout) as r:
+        with urllib.request.urlopen(f'http://{PI_HOST}:{GATEWAYS[key]["port"]}/ping', timeout=timeout) as r:
             return r.status == 200
     except Exception:
         return False
@@ -40,29 +42,26 @@ def status() -> dict[str, bool]:
 
 
 def start(key: str) -> dict:
-    """Start a gateway detached unless it already answers /ping. Returns {'state', 'detail'}
-    where state is 'already_up' | 'started' | 'failed'."""
+    """Restart a gateway's systemd service on the Pi unless it already answers /ping.
+    Returns {'state', 'detail'} where state is 'already_up' | 'started' | 'failed'."""
     g = GATEWAYS[key]
     if is_up(key):
         return {'state': 'already_up', 'port': g['port']}
-    script = SERVICE_DIR / g['script']
-    if not script.exists():
-        return {'state': 'failed', 'detail': f'{script} not found', 'port': g['port']}
-    LOGDIR.mkdir(parents=True, exist_ok=True)
-    log_path = LOGDIR / f'{key}-gateway.log'
-    with open(log_path, 'ab') as log:
-        proc = subprocess.Popen(
-            [sys.executable, str(script)], cwd=str(SERVICE_DIR), stdin=subprocess.DEVNULL,
-            stdout=log, stderr=log,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-            | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    try:
+        proc = subprocess.run(
+            ['ssh', '-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes', PI_SSH,
+             f'sudo systemctl restart {g["service"]}'],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {'state': 'failed', 'detail': f'ssh {PI_SSH} failed: {exc}', 'port': g['port']}
+    if proc.returncode != 0:
+        return {'state': 'failed', 'detail': f'systemctl restart exited {proc.returncode}: '
+                f'{(proc.stderr or proc.stdout).strip()[:200]}', 'port': g['port']}
     deadline = time.monotonic() + START_WAIT_S
     while time.monotonic() < deadline:
         if is_up(key):
-            return {'state': 'started', 'pid': proc.pid, 'port': g['port']}
-        if proc.poll() is not None:
-            return {'state': 'failed', 'detail': f'exited with code {proc.returncode}; see {log_path}',
-                    'port': g['port']}
-        time.sleep(1)
-    return {'state': 'failed', 'detail': f'no /ping response after {START_WAIT_S}s; see {log_path}',
-            'port': g['port']}
+            return {'state': 'started', 'port': g['port']}
+        time.sleep(2)
+    return {'state': 'failed', 'detail': f'no /ping response after {START_WAIT_S}s; see '
+            f'{PI_LOG_DIR}/{key}_gateway.log on {PI_SSH}', 'port': g['port']}
