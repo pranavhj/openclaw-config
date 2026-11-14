@@ -154,6 +154,7 @@ def _refresh_projects():
 # Remote Control sessions (OC-041): deterministic `rc` command, bypasses triage
 # ---------------------------------------------------------------------------
 
+import driver_answers
 import rc_commands
 import rc_gateways
 import rc_sessions
@@ -1152,6 +1153,19 @@ async def on_message(message):
              'author_id': message.author.id, 'channel_type': type(message.channel).__name__})
         log.info('ignored author=%s channel_type=%s', message.author.id, type(message.channel).__name__)
         return
+    # plan-driver owner answers (OC-049): "Q-7K2M 1" lines, from a DM or #reminders (where the driver asks); the
+    # allowed user only (checked above); deterministic, no triage and no Claude call. A message that is not answers to
+    # known questions (driver_answers.answer_all returns None) goes on exactly as before.
+    if ((isinstance(message.channel, discord.DMChannel) or str(message.channel.id) == driver_answers.CHANNEL_ID)
+            and driver_answers.parse(message.content) and message.id not in _recent_msg_ids):
+        reply = await asyncio.to_thread(driver_answers.answer_all, message.content)
+        if reply is not None:
+            _recent_msg_ids.append(message.id)
+            _tl({'ts': _ts_iso(), 'event': 'driver_answers', 'message_id': message.id,
+                 'channel_id': message.channel.id, 'reply': reply[:300]})
+            log.info('driver answers: %s', reply.replace(chr(10), ' | ')[:300])
+            await message.reply(reply[:1900])
+            return
     if not isinstance(message.channel, discord.DMChannel):
         _tl({'ts': _ts_iso(), 'event': 'message_ignored', 'reason': 'not_dm',
              'author_id': message.author.id, 'channel_type': type(message.channel).__name__})
